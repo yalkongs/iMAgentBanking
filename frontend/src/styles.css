@@ -1,0 +1,1584 @@
+/* ──────────────────────────────────────────────
+   CSS Variables — Design System
+   ────────────────────────────────────────────── */
+:root {
+  --bg-primary: #0D0F1A;
+  --bg-secondary: #141627;
+  --bg-tertiary: #1C1F35;
+  --bg-card: #1E2138;
+  --bg-input: #252846;
+
+  --accent: #00C9A7;
+  --accent-hover: #00A88A;
+  --accent-dim: rgba(0, 201, 167, 0.15);
+  --accent-border: rgba(0, 201, 167, 0.3);
+
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted: #475569;
+
+  --success: #34D399;
+  --success-dim: rgba(52, 211, 153, 0.15);
+  --error: #F87171;
+  --error-dim: rgba(248, 113, 113, 0.15);
+  --warning: #FBBF24;
+  --warning-dim: rgba(251, 191, 36, 0.15);
+
+  --border: rgba(255, 255, 255, 0.07);
+  --border-accent: rgba(129, 140, 248, 0.3);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --font-sans: 'Pretendard', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ──────────────────────────────────────────────
+   Reset & Base
+   ────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+input, textarea {
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+/* ──────────────────────────────────────────────
+   App Layout
+   ────────────────────────────────────────────── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--bg-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 캔버스 위에 올라오는 모든 UI 레이어 */
+.header,
+.messages,
+.input-area,
+.alert-banner {
+  position: relative;
+  z-index: 1;
+}
+
+/* ──────────────────────────────────────────────
+   Header
+   ────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(20, 22, 39, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-logo {
+  height: 28px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
+.header-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.header-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-icon:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.menu-wrapper {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 130px;
+  z-index: 100;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 13px;
+  font-family: var(--font-main);
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-tertiary);
+}
+
+/* ──────────────────────────────────────────────
+   Messages Area
+   ────────────────────────────────────────────── */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+.messages::-webkit-scrollbar {
+  width: 4px;
+}
+.messages::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+}
+
+/* ──────────────────────────────────────────────
+   Messages — Alert Banner
+   ────────────────────────────────────────────── */
+.alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--warning-dim);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-md);
+  margin-bottom: 4px;
+}
+
+.alert-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* ──────────────────────────────────────────────
+   Message Bubble
+   ────────────────────────────────────────────── */
+.message {
+  display: flex;
+  gap: 10px;
+  max-width: 100%;
+  align-items: flex-start;
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+/* AI 아바타 — iM 로고마크 */
+.message-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: rgba(0, 201, 167, 0.08);
+  border: 1px solid rgba(0, 201, 167, 0.20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  margin-top: 2px;
+}
+
+.message-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ── 버블 공통 ── */
+.message-bubble {
+  max-width: 80%;
+  padding: 11px 15px;
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+/* ── AI 버블 — 어두운 glass + 왼쪽 teal 액센트 ── */
+.message.assistant .message-bubble {
+  background: rgba(22, 25, 45, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid rgba(0, 201, 167, 0.40);
+  border-radius: 4px 14px 14px 14px;
+  color: var(--text-primary);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ── 사용자 버블 — teal glass ── */
+.message.user .message-bubble {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 201, 167, 0.16) 0%,
+    rgba(0, 180, 150, 0.10) 100%
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 201, 167, 0.28);
+  border-right: 2px solid rgba(0, 201, 167, 0.55);
+  border-radius: 14px 4px 14px 14px;
+  color: #d6fdf5;
+  box-shadow:
+    0 4px 24px rgba(0, 201, 167, 0.08),
+    inset 0 1px 0 rgba(0, 229, 190, 0.10);
+}
+
+.message-bubble p {
+  margin: 0;
+}
+
+.message-bubble p + p {
+  margin-top: 6px;
+}
+
+/* 마크다운 렌더링 */
+.message-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.message-bubble th,
+.message-bubble td {
+  padding: 6px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+
+.message-bubble th {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.message-bubble td {
+  color: var(--text-primary);
+}
+
+.message-bubble tr:nth-child(even) td {
+  background: rgba(255,255,255,0.02);
+}
+
+.message-bubble strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.message-bubble ul,
+.message-bubble ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+
+.message-bubble li {
+  margin: 2px 0;
+}
+
+.message-bubble code {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* 스트리밍 커서 */
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ──────────────────────────────────────────────
+   Transfer Confirmation Card
+   ────────────────────────────────────────────── */
+.transfer-card {
+  background: rgba(11, 13, 30, 0.88);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(0, 201, 167, 0.22);
+  border-radius: var(--radius-lg);
+  padding: 20px 18px 16px;
+  margin-left: 40px;
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(0, 229, 190, 0.06);
+}
+
+.transfer-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.60);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.transfer-amount-hero {
+  font-size: 30px;
+  font-weight: 700;
+  color: rgba(0, 229, 190, 0.96);
+  font-family: var(--font-mono);
+  letter-spacing: -1.5px;
+  margin-bottom: 16px;
+}
+
+.transfer-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 16px;
+}
+
+.transfer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.transfer-row:last-child {
+  border-bottom: none;
+}
+
+.transfer-lbl {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.transfer-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: -0.3px;
+}
+
+/* ── 출금 계좌 선택 ── */
+.transfer-account-section {
+  margin-bottom: 14px;
+}
+
+.transfer-account-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.3px;
+}
+
+.transfer-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.transfer-account-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  width: 100%;
+  text-align: left;
+}
+
+.transfer-account-btn:hover {
+  background: rgba(0, 201, 167, 0.06);
+  border-color: rgba(0, 201, 167, 0.20);
+}
+
+.transfer-account-btn.selected {
+  background: rgba(0, 201, 167, 0.10);
+  border-color: rgba(0, 201, 167, 0.40);
+}
+
+.transfer-account-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.transfer-account-balance {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.transfer-account-btn.selected .transfer-account-balance {
+  color: rgba(0, 201, 167, 0.80);
+}
+
+.transfer-account-warn {
+  font-size: 12px;
+  color: var(--error);
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: var(--error-dim);
+  border-radius: var(--radius-sm);
+}
+
+.transfer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.transfer-btn-confirm {
+  flex: 2;
+  padding: 12px;
+  background: rgba(0, 201, 167, 0.90);
+  color: #0a1a16;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.transfer-btn-confirm:hover {
+  background: rgba(0, 229, 190, 1);
+}
+
+.transfer-btn-confirm:active {
+  transform: scale(0.97);
+}
+
+.transfer-btn-confirm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.transfer-btn-cancel {
+  flex: 1;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.15s;
+}
+
+.transfer-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.transfer-btn-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Transfer complete / failed */
+.transfer-result {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  margin-left: 40px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transfer-result.success {
+  background: var(--success-dim);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  color: var(--success);
+}
+
+.transfer-result.failed {
+  background: var(--error-dim);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  color: var(--error);
+}
+
+/* ──────────────────────────────────────────────
+   Typing indicator
+   ────────────────────────────────────────────── */
+.typing-indicator {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 5px;
+  padding: 13px 16px;
+  background: rgba(22, 25, 45, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid rgba(0, 201, 167, 0.40);
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.30);
+}
+
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  background: rgba(0, 201, 167, 0.70);
+  border-radius: 50%;
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.22s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0);    opacity: 0.30; }
+  30%           { transform: translateY(-5px); opacity: 1;    }
+}
+
+/* ──────────────────────────────────────────────
+   Input Area
+   ────────────────────────────────────────────── */
+.input-area {
+  padding: 12px 16px 16px;
+  background: rgba(20, 22, 39, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 8px 8px 8px 16px;
+  transition: border-color 0.15s;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--accent-border);
+}
+
+.input-text {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.5;
+  resize: none;
+  max-height: 120px;
+  min-height: 24px;
+  padding: 0;
+  scrollbar-width: none;
+}
+
+.input-text::placeholder {
+  color: var(--text-muted);
+}
+
+.input-text::-webkit-scrollbar {
+  display: none;
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-mic {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  transition: background 0.15s, color 0.15s;
+  border: 1px solid var(--border);
+}
+
+.btn-mic:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.btn-mic.recording {
+  background: var(--error-dim);
+  color: var(--error);
+  border-color: rgba(248, 113, 113, 0.4);
+  animation: pulse-mic 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-mic {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(248, 113, 113, 0); }
+}
+
+.btn-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btn-send:hover {
+  background: var(--accent-hover);
+}
+
+.btn-send:active {
+  transform: scale(0.92);
+}
+
+.btn-send:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* ──────────────────────────────────────────────
+   Empty State
+   ────────────────────────────────────────────── */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  gap: 16px;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 260px;
+}
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 280px;
+  margin-top: 8px;
+}
+
+.quick-btn {
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.quick-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+/* ──────────────────────────────────────────────
+   UI 카드 공통 — dark glass
+   ────────────────────────────────────────────── */
+.ui-card {
+  background: rgba(11, 13, 30, 0.82);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(0, 201, 167, 0.13);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ── 퀵액션 공통 ── */
+.card-quick-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(0, 201, 167, 0.10);
+  background: rgba(0, 201, 167, 0.03);
+}
+
+.cqa-btn {
+  flex: 1;
+  padding: 7px 4px;
+  background: rgba(0, 201, 167, 0.08);
+  border: 1px solid rgba(0, 201, 167, 0.18);
+  border-radius: var(--radius-sm);
+  color: rgba(0, 201, 167, 0.85);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.cqa-btn:hover {
+  background: rgba(0, 201, 167, 0.16);
+  border-color: rgba(0, 201, 167, 0.35);
+  color: rgba(0, 229, 190, 1);
+}
+
+/* ── 잔액 카드 ── */
+.balance-hero {
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid rgba(0, 201, 167, 0.10);
+}
+
+.balance-hero-label {
+  font-size: 11px;
+  color: rgba(0, 201, 167, 0.60);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.balance-hero-amount {
+  font-size: 26px;
+  font-weight: 700;
+  color: rgba(0, 229, 190, 0.95);
+  font-family: var(--font-mono);
+  letter-spacing: -1px;
+}
+
+.balance-accounts {
+  padding: 4px 0;
+}
+
+.balance-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.balance-account:last-child {
+  border-bottom: none;
+}
+
+.balance-account-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.balance-acct-bar {
+  width: 2px;
+  height: 28px;
+  background: rgba(0, 201, 167, 0.35);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.balance-account-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.balance-account-no {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.balance-amount {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: -0.5px;
+}
+
+/* ── 거래 내역 카드 ── */
+.tx-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tx-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.tx-card-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.tx-list {
+  padding: 4px 0;
+}
+
+.tx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.tx-item:last-child {
+  border-bottom: none;
+}
+
+.tx-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.tx-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tx-counterpart {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tx-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tx-amount {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  letter-spacing: -0.3px;
+}
+
+.tx-amount.income {
+  color: rgba(52, 211, 153, 0.90);
+}
+
+.tx-amount.expense {
+  color: rgba(241, 245, 249, 0.75);
+}
+
+/* ── 지출 분석 카드 ── */
+.spending-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.spending-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.spending-period {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.spending-hero {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.spending-hero-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.spending-hero-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: rgba(241, 245, 249, 0.95);
+  font-family: var(--font-mono);
+  letter-spacing: -1px;
+}
+
+.spending-list {
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spending-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.spending-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spending-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.spending-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.spending-amount {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: -0.3px;
+}
+
+.spending-bar-track {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-left: 14px;
+}
+
+.spending-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* ── 인사이트 카드 ── */
+.insight-header {
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.insight-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.insight-big {
+  font-size: 28px;
+  font-weight: 700;
+  color: rgba(0, 229, 190, 0.95);
+  font-family: var(--font-mono);
+  padding: 14px 16px 10px;
+  letter-spacing: -1px;
+}
+
+.insight-rows {
+  padding-bottom: 4px;
+}
+
+.insight-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.insight-lbl {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.insight-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.insight-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 8px 16px 14px;
+  line-height: 1.55;
+}
+
+/* ── cqa primary ── */
+.cqa-btn-primary {
+  background: rgba(0, 201, 167, 0.18);
+  border-color: rgba(0, 201, 167, 0.40);
+  color: rgba(0, 229, 190, 1);
+  font-weight: 600;
+}
+
+/* ── 연락처 후보 선택 카드 ── */
+.candidates-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.candidates-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.candidates-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.candidates-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.candidate-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  width: 100%;
+}
+
+.candidate-item:last-child {
+  border-bottom: none;
+}
+
+.candidate-item:hover {
+  background: rgba(0, 201, 167, 0.06);
+}
+
+.candidate-item:active {
+  background: rgba(0, 201, 167, 0.12);
+}
+
+.candidate-index {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 201, 167, 0.12);
+  border: 1px solid rgba(0, 201, 167, 0.25);
+  color: rgba(0, 201, 167, 0.80);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.candidate-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.candidate-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.candidate-bank {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.candidate-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.candidate-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+}
+
+.candidate-date {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── 이체 금액 제안 카드 ── */
+.suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.suggestion-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.suggestion-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.suggestion-body {
+  padding: 14px 16px 12px;
+}
+
+.suggestion-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.suggestion-amount {
+  font-size: 26px;
+  font-weight: 700;
+  color: rgba(0, 229, 190, 0.95);
+  font-family: var(--font-mono);
+  letter-spacing: -1px;
+  margin-bottom: 4px;
+}
+
+.suggestion-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── 이체 완료 영수증 ── */
+.transfer-receipt {
+  background: rgba(11, 13, 30, 0.88);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 18px 18px 14px;
+  margin-left: 40px;
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(52, 211, 153, 0.06);
+}
+
+.receipt-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.receipt-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: rgba(52, 211, 153, 0.90);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.receipt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(52, 211, 153, 0.70);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.receipt-amount {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: -1px;
+  margin-bottom: 14px;
+}
+
+.receipt-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.receipt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.receipt-row:last-child {
+  border-bottom: none;
+}
+
+.receipt-row-balance {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(52, 211, 153, 0.15);
+  border-bottom: none;
+}
+
+.receipt-lbl {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.receipt-val {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.receipt-val-balance {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(52, 211, 153, 0.90);
+  font-family: var(--font-mono);
+}
+
+/* ── 빠른 시작 카테고리 ── */
+.quick-categories {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.quick-category-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(0, 201, 167, 0.55);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.quick-category-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-btn {
+  padding: 8px 14px;
+  background: rgba(11, 13, 30, 0.75);
+  border: 1px solid rgba(0, 201, 167, 0.15);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.quick-btn:hover {
+  background: rgba(0, 201, 167, 0.10);
+  border-color: rgba(0, 201, 167, 0.35);
+  color: rgba(0, 229, 190, 0.95);
+}
+
+/* ── 백그라운드 입출금 알림 카드 ── */
+.tx-alert-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: rgba(11, 13, 30, 0.80);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  animation: slide-in 0.3s ease;
+}
+
+.tx-alert-card.income {
+  border-color: rgba(52, 211, 153, 0.22);
+}
+
+.tx-alert-card.expense {
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tx-alert-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tx-alert-card.income .tx-alert-dot { background: rgba(52, 211, 153, 0.80); }
+.tx-alert-card.expense .tx-alert-dot { background: rgba(148, 163, 184, 0.60); }
+
+.tx-alert-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tx-alert-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.tx-alert-counterpart {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tx-alert-amount {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.tx-alert-card.income .tx-alert-amount { color: rgba(52, 211, 153, 0.90); }
+.tx-alert-card.expense .tx-alert-amount { color: var(--text-primary); }
+
+.tx-alert-bottom {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+.tx-alert-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tx-alert-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.tx-alert-comment {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.tx-alert-action {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 201, 167, 0.75);
+  background: rgba(0, 201, 167, 0.08);
+  border: 1px solid rgba(0, 201, 167, 0.18);
+  border-radius: 12px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.tx-alert-action:hover {
+  background: rgba(0, 201, 167, 0.15);
+}
+
+/* ──────────────────────────────────────────────
+   Scrollbar — desktop
+   ────────────────────────────────────────────── */
+@media (min-width: 481px) {
+  .app {
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.5);
+  }
+}

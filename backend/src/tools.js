@@ -1,0 +1,629 @@
+import { accounts, contacts, transactions, cards, cardTransactions } from './mockData.js'
+
+// ──────────────────────────────────────────────
+// 닉네임 → 실제 계좌 매핑 스토어 (메모리 내 영속)
+// { nickname → { realName, bank, accountNo } }
+// ──────────────────────────────────────────────
+export const aliasStore = new Map()
+
+// ──────────────────────────────────────────────
+// Claude Tool 정의
+// ──────────────────────────────────────────────
+export const toolDefinitions = [
+  {
+    name: 'get_balance',
+    description: '계좌 잔액을 조회합니다. 특정 계좌 또는 전체 계좌 잔액을 반환합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        account_id: {
+          type: 'string',
+          description: '조회할 계좌 ID (acc001~acc005). 생략하면 전체 계좌를 반환.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_transactions',
+    description: '거래 내역을 조회합니다. 기간, 카테고리, 거래 상대방으로 필터링 가능합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        account_id: {
+          type: 'string',
+          description: '조회할 계좌 ID. 생략하면 주계좌(acc001) 기준.',
+        },
+        start_date: { type: 'string', description: '조회 시작일 (YYYY-MM-DD)' },
+        end_date:   { type: 'string', description: '조회 종료일 (YYYY-MM-DD)' },
+        category: {
+          type: 'string',
+          description: '카테고리 필터. 예: 카페, 식비, 쇼핑, 송금, 급여, 교통, 문화, 의료, 입금, 이체, 이자, 구독, 헬스, 통신, 보험, 교육, 여행',
+        },
+        counterpart: {
+          type: 'string',
+          description: '거래 상대방 실명 (부분 일치). 예: 김영희, 스타벅스',
+        },
+        limit:   { type: 'number',  description: '반환할 최대 건수. 기본값 20.' },
+        sort_by: {
+          type: 'string',
+          enum: ['date_desc', 'date_asc', 'amount_desc', 'amount_asc'],
+          description: '정렬 기준. 기본값 date_desc.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'resolve_contact',
+    description: `닉네임(엄마, 절친 등)이나 실명으로 수신자를 확인합니다.
+- aliasStore에 저장된 닉네임이면 status:"known" 반환
+- 처음 보는 닉네임이면 status:"candidates"로 거래 빈도순 후보 목록 반환
+- 이체/조회 전 반드시 호출하세요.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '검색할 닉네임 또는 실명. 예: 엄마, 김영희',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'save_alias',
+    description: '사용자가 확인한 닉네임 → 계좌 매핑을 저장합니다. resolve_contact가 candidates를 반환하고 사용자가 특정 계좌를 선택했을 때 호출하세요.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nickname: {
+          type: 'string',
+          description: '저장할 닉네임. 예: 엄마, 절친',
+        },
+        account_no: {
+          type: 'string',
+          description: '연결할 계좌번호. contacts 목록의 accountNo와 일치해야 합니다.',
+        },
+      },
+      required: ['nickname', 'account_no'],
+    },
+  },
+  {
+    name: 'get_transfer_suggestion',
+    description: '특정 수신자에게 보낸 거래 이력을 분석해 송금 금액을 제안합니다. 금액이 명시되지 않은 이체 요청 시 호출하세요.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        real_name: {
+          type: 'string',
+          description: '수신자 실명. 예: 김영희, 김철수',
+        },
+      },
+      required: ['real_name'],
+    },
+  },
+  {
+    name: 'transfer',
+    description: '계좌 이체를 실행합니다. to_contact에는 resolve_contact로 확인된 실명을 전달하세요. 호출 시 사용자 확인 UI가 표시됩니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to_contact: {
+          type: 'string',
+          description: '받는 사람 실명 (resolve_contact로 확인된 값). 예: 김영희',
+        },
+        amount: {
+          type: 'number',
+          description: '이체할 금액 (원). 예: 50000',
+        },
+        from_account_id: {
+          type: 'string',
+          description: '출금 계좌 ID. 기본값 acc001 (주계좌)',
+        },
+        memo: {
+          type: 'string',
+          description: '이체 메모',
+        },
+      },
+      required: ['to_contact', 'amount'],
+    },
+  },
+  {
+    name: 'get_card_transactions',
+    description: `카드 거래내역을 조회합니다 (마이데이터 포함).
+- merchant(가맹점명)만 기록되며, 품목 상세는 알 수 없습니다.
+- inferredCategory는 가맹점 기반 추정이므로 부정확할 수 있습니다.
+- 쿠팡·네이버페이 등 종합몰은 categoryNote에 '품목 불명' 표기됩니다.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        card_id: {
+          type: 'string',
+          description: '조회할 카드 ID (card001, card002). 생략 시 전체 카드.',
+        },
+        start_date: { type: 'string', description: '조회 시작일 (YYYY-MM-DD)' },
+        end_date:   { type: 'string', description: '조회 종료일 (YYYY-MM-DD)' },
+        inferred_category: {
+          type: 'string',
+          description: '추정 카테고리 필터. 예: 카페, 식비, 쇼핑, 구독, 교통, 의료, 문화',
+        },
+        merchant: {
+          type: 'string',
+          description: '가맹점명 부분 일치 검색',
+        },
+        limit: { type: 'number', description: '반환 건수. 기본 30.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'analyze_card_spending',
+    description: `카드 거래내역 기반 지출을 분석합니다 (마이데이터 포함).
+- 카드 내역의 카테고리는 가맹점 기반 추정이므로 부정확할 수 있음을 사용자에게 고지하세요.
+- 쿠팡·네이버페이 등 종합몰 지출은 실제 품목과 다를 수 있습니다.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '분석 시작일 (YYYY-MM-DD)' },
+        end_date:   { type: 'string', description: '분석 종료일 (YYYY-MM-DD)' },
+        card_id:    { type: 'string', description: '특정 카드만 분석 시 card_id 지정. 생략 시 전체.' },
+        group_by: {
+          type: 'string',
+          enum: ['inferredCategory', 'merchant', 'cardId'],
+          description: '집계 기준. 기본값 inferredCategory.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'analyze_spending',
+    description: '특정 기간의 지출을 카테고리별로 분석합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '분석 시작일 (YYYY-MM-DD)' },
+        end_date:   { type: 'string', description: '분석 종료일 (YYYY-MM-DD)' },
+        group_by: {
+          type: 'string',
+          enum: ['category', 'counterpart'],
+          description: '집계 기준. 기본값 category.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'complex_query',
+    description: '복잡한 조회를 처리합니다. "지난 달 가장 큰 입금액", "이번 달 카페 총 지출" 등.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query_type: {
+          type: 'string',
+          enum: [
+            'max_income_last_month',
+            'max_expense_last_month',
+            'total_by_category_this_month',
+            'total_by_category_last_month',
+            'transfer_count',
+            'biggest_single_expense',
+          ],
+          description: '조회 유형',
+        },
+        category: {
+          type: 'string',
+          description: 'category 조회 시 카테고리명',
+        },
+      },
+      required: ['query_type'],
+    },
+  },
+]
+
+// ──────────────────────────────────────────────
+// Tool 핸들러
+// ──────────────────────────────────────────────
+
+function handleGetBalance({ account_id }) {
+  if (account_id) {
+    const acc = accounts.find((a) => a.id === account_id)
+    if (!acc) return { error: `계좌 ${account_id}를 찾을 수 없습니다.` }
+    return {
+      accounts: [{
+        id: acc.id, name: acc.name, bank: acc.bank,
+        accountNo: acc.accountNo, balance: acc.balance,
+        balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
+      }],
+    }
+  }
+  return {
+    accounts: accounts.map((acc) => ({
+      id: acc.id, name: acc.name, bank: acc.bank,
+      accountNo: acc.accountNo, balance: acc.balance,
+      balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
+    })),
+    totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
+    totalBalanceFormatted: accounts.reduce((s, a) => s + a.balance, 0).toLocaleString('ko-KR') + '원',
+  }
+}
+
+function handleGetTransactions({
+  account_id = 'acc001', start_date, end_date,
+  category, counterpart, limit = 20, sort_by = 'date_desc',
+}) {
+  let txs = transactions.filter((t) => t.accountId === account_id)
+  if (start_date)  txs = txs.filter((t) => t.date >= start_date)
+  if (end_date)    txs = txs.filter((t) => t.date <= end_date)
+  if (category)    txs = txs.filter((t) => t.category === category)
+  if (counterpart) txs = txs.filter((t) => t.counterpart.includes(counterpart))
+
+  const sortFns = {
+    date_desc:   (a, b) => b.date.localeCompare(a.date),
+    date_asc:    (a, b) => a.date.localeCompare(b.date),
+    amount_desc: (a, b) => b.amount - a.amount,
+    amount_asc:  (a, b) => a.amount - b.amount,
+  }
+  txs = txs.sort(sortFns[sort_by] || sortFns.date_desc).slice(0, limit)
+
+  return {
+    count: txs.length,
+    transactions: txs.map((t) => ({
+      ...t,
+      amountFormatted: (t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR') + '원',
+    })),
+  }
+}
+
+function maskAccountNo(accountNo) {
+  // 계좌번호 뒷 4자리만 표시: "110-234-567890" → "****7890"
+  const digits = accountNo.replace(/\D/g, '')
+  return '****' + digits.slice(-4)
+}
+
+function handleResolveContact({ query }) {
+  const q = query.trim()
+
+  // 1. aliasStore에 저장된 닉네임인지 확인
+  if (aliasStore.has(q)) {
+    const c = aliasStore.get(q)
+    return {
+      status: 'known',
+      nickname: q,
+      contact: { realName: c.realName, bank: c.bank, accountNoMasked: maskAccountNo(c.accountNo), accountNo: c.accountNo },
+    }
+  }
+
+  // 2. 실명 완전 일치 (실명으로 직접 조회한 경우)
+  const exactByName = contacts.find((c) => c.realName === q)
+  if (exactByName) {
+    return {
+      status: 'known',
+      nickname: q,
+      contact: { ...exactByName, accountNoMasked: maskAccountNo(exactByName.accountNo) },
+    }
+  }
+
+  // 3. 닉네임 미등록 → 거래 이력이 있는 후보만 추출 (빈도순)
+  const candidates = contacts
+    .map((c) => {
+      const sentTxs = transactions.filter((t) =>
+        t.accountId === 'acc001' &&
+        t.amount < 0 &&
+        t.category === '송금' &&
+        t.counterpart === c.realName
+      ).sort((a, b) => b.date.localeCompare(a.date))
+
+      return {
+        realName: c.realName,
+        bank: c.bank,
+        accountNo: c.accountNo,
+        accountNoMasked: maskAccountNo(c.accountNo),
+        transferCount: sentTxs.length,
+        lastTransferDate: sentTxs[0]?.date || null,
+      }
+    })
+    .filter((c) => c.transferCount > 0)          // 거래 이력 있는 후보만
+    .sort((a, b) => b.transferCount - a.transferCount)
+    .slice(0, 5)                                  // 최대 5명
+
+  if (candidates.length > 0) {
+    return {
+      status: 'candidates',
+      query: q,
+      candidates,
+      message: `'${q}'에 등록된 계좌가 없습니다. 이전에 송금한 내역을 바탕으로 후보를 추렸습니다.`,
+    }
+  }
+
+  // 4. 거래 이력도 없음 → 계좌 등록 유도
+  return {
+    status: 'no_history',
+    query: q,
+    message: `'${q}'에 해당하는 계좌가 등록되어 있지 않고, 거래 이력도 없습니다.`,
+  }
+}
+
+function handleSaveAlias({ nickname, account_no }) {
+  const contact = contacts.find((c) => c.accountNo === account_no)
+  if (!contact) {
+    return { success: false, error: `계좌번호 ${account_no}를 찾을 수 없습니다.` }
+  }
+  aliasStore.set(nickname, {
+    realName: contact.realName,
+    bank: contact.bank,
+    accountNo: contact.accountNo,
+  })
+  return {
+    success: true,
+    nickname,
+    contact: { realName: contact.realName, bank: contact.bank, accountNo: contact.accountNo },
+    message: `'${nickname}' → ${contact.realName} (${contact.bank}) 등록 완료.`,
+  }
+}
+
+function handleGetTransferSuggestion({ real_name }) {
+  const sentTxs = transactions
+    .filter((t) =>
+      t.accountId === 'acc001' &&
+      t.amount < 0 &&
+      t.category === '송금' &&
+      t.counterpart === real_name
+    )
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  if (sentTxs.length === 0) {
+    return { found: false, message: `${real_name}에게 보낸 송금 내역이 없습니다.` }
+  }
+
+  // 가장 빈번한 금액 찾기
+  const freqMap = {}
+  for (const tx of sentTxs) {
+    const amt = Math.abs(tx.amount)
+    freqMap[amt] = (freqMap[amt] || 0) + 1
+  }
+  const suggestedAmount = Number(
+    Object.entries(freqMap).sort((a, b) => b[1] - a[1])[0][0]
+  )
+
+  return {
+    found: true,
+    realName: real_name,
+    suggestedAmount,
+    suggestedAmountFormatted: suggestedAmount.toLocaleString('ko-KR') + '원',
+    frequency: freqMap[suggestedAmount],
+    totalCount: sentTxs.length,
+    recentAmounts: sentTxs.slice(0, 5).map((t) => ({
+      amount: Math.abs(t.amount),
+      amountFormatted: Math.abs(t.amount).toLocaleString('ko-KR') + '원',
+      date: t.date,
+    })),
+    lastDate: sentTxs[0].date,
+  }
+}
+
+function handleGetCardTransactions({
+  card_id, start_date, end_date, inferred_category, merchant, limit = 30,
+}) {
+  let txs = [...cardTransactions]
+  if (card_id)           txs = txs.filter((t) => t.cardId === card_id)
+  if (start_date)        txs = txs.filter((t) => t.date >= start_date)
+  if (end_date)          txs = txs.filter((t) => t.date <= end_date)
+  if (inferred_category) txs = txs.filter((t) => t.inferredCategory === inferred_category)
+  if (merchant)          txs = txs.filter((t) => t.merchant.includes(merchant))
+
+  txs.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))
+  txs = txs.slice(0, limit)
+
+  const cardMap = Object.fromEntries(cards.map((c) => [c.id, c]))
+
+  return {
+    notice: '카드 거래내역의 카테고리는 가맹점명 기반 추정이며, 쿠팡·네이버페이 등 종합몰은 품목을 알 수 없습니다.',
+    count: txs.length,
+    transactions: txs.map((t) => ({
+      ...t,
+      cardName: cardMap[t.cardId]?.name || t.cardId,
+      cardSource: cardMap[t.cardId]?.source || 'own',
+      amountFormatted: t.amount.toLocaleString('ko-KR') + '원',
+    })),
+  }
+}
+
+export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group_by = 'inferredCategory' }) {
+  const now = new Date()
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const s = start_date || defaultStart
+  const e = end_date || now.toISOString().slice(0, 10)
+
+  let txs = cardTransactions.filter((t) => t.amount < 0 && t.date >= s && t.date <= e)
+  if (card_id) txs = txs.filter((t) => t.cardId === card_id)
+
+  const groups = {}
+  for (const t of txs) {
+    const key = t[group_by] || '기타'
+    if (!groups[key]) groups[key] = { total: 0, count: 0, ambiguous: 0 }
+    groups[key].total += Math.abs(t.amount)
+    groups[key].count++
+    if (t.categoryNote) groups[key].ambiguous++
+  }
+
+  const cardMap = Object.fromEntries(cards.map((c) => [c.id, c.name]))
+  const sorted = Object.entries(groups)
+    .map(([key, v]) => ({
+      [group_by]: group_by === 'cardId' ? (cardMap[key] || key) : key,
+      total: v.total,
+      totalFormatted: v.total.toLocaleString('ko-KR') + '원',
+      count: v.count,
+      ambiguousCount: v.ambiguous,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  const grandTotal = sorted.reduce((s, g) => s + g.total, 0)
+
+  return {
+    notice: '카테고리는 가맹점 기반 추정이며 실제와 다를 수 있습니다. 특히 쿠팡·마켓컬리 등 종합몰은 품목 불명입니다.',
+    period: { start: s, end: e },
+    groupBy: group_by,
+    items: sorted,
+    total: grandTotal,
+    totalFormatted: grandTotal.toLocaleString('ko-KR') + '원',
+  }
+}
+
+export function handleAnalyzeSpending({ start_date, end_date, group_by = 'category' }) {
+  const now = new Date()
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const s = start_date || defaultStart
+  const e = end_date || now.toISOString().slice(0, 10)
+
+  const txs = transactions.filter((t) =>
+    t.accountId === 'acc001' && t.amount < 0 && t.date >= s && t.date <= e
+  )
+
+  const groups = {}
+  for (const t of txs) {
+    const key = t[group_by]
+    if (!groups[key]) groups[key] = 0
+    groups[key] += Math.abs(t.amount)
+  }
+
+  const sorted = Object.entries(groups)
+    .map(([key, total]) => ({ [group_by]: key, total, totalFormatted: total.toLocaleString('ko-KR') + '원' }))
+    .sort((a, b) => b.total - a.total)
+
+  const grandTotal = sorted.reduce((s, g) => s + g.total, 0)
+  return {
+    period: { start: s, end: e },
+    groupBy: group_by,
+    items: sorted,
+    total: grandTotal,
+    totalFormatted: grandTotal.toLocaleString('ko-KR') + '원',
+  }
+}
+
+function handleComplexQuery({ query_type, category }) {
+  const now = new Date()
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10)
+  const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10)
+  const acc = 'acc001'
+
+  switch (query_type) {
+    case 'max_income_last_month': {
+      const txs = transactions.filter((t) =>
+        t.accountId === acc && t.amount > 0 && t.date >= lastMonthStart && t.date <= lastMonthEnd
+      )
+      if (!txs.length) return { result: null, message: '지난 달 입금 내역이 없습니다.' }
+      const max = txs.reduce((m, t) => (t.amount > m.amount ? t : m), txs[0])
+      return { result: max, amountFormatted: max.amount.toLocaleString('ko-KR') + '원' }
+    }
+    case 'max_expense_last_month': {
+      const txs = transactions.filter((t) =>
+        t.accountId === acc && t.amount < 0 && t.date >= lastMonthStart && t.date <= lastMonthEnd
+      )
+      if (!txs.length) return { result: null, message: '지난 달 지출 내역이 없습니다.' }
+      const max = txs.reduce((m, t) => (t.amount < m.amount ? t : m), txs[0])
+      return { result: max, amountFormatted: Math.abs(max.amount).toLocaleString('ko-KR') + '원' }
+    }
+    case 'total_by_category_this_month': {
+      const txs = transactions.filter((t) =>
+        t.accountId === acc && t.amount < 0 && t.date >= thisMonthStart &&
+        (!category || t.category === category)
+      )
+      const total = txs.reduce((s, t) => s + Math.abs(t.amount), 0)
+      return { category: category || '전체', period: '이번 달', total, totalFormatted: total.toLocaleString('ko-KR') + '원', count: txs.length }
+    }
+    case 'total_by_category_last_month': {
+      const txs = transactions.filter((t) =>
+        t.accountId === acc && t.amount < 0 && t.date >= lastMonthStart && t.date <= lastMonthEnd &&
+        (!category || t.category === category)
+      )
+      const total = txs.reduce((s, t) => s + Math.abs(t.amount), 0)
+      return { category: category || '전체', period: '지난 달', total, totalFormatted: total.toLocaleString('ko-KR') + '원', count: txs.length }
+    }
+    case 'transfer_count': {
+      const txs = transactions.filter((t) =>
+        t.accountId === acc && t.category === '송금' && t.date >= thisMonthStart
+      )
+      return { count: txs.length, total: txs.reduce((s, t) => s + Math.abs(t.amount), 0), totalFormatted: txs.reduce((s, t) => s + Math.abs(t.amount), 0).toLocaleString('ko-KR') + '원' }
+    }
+    case 'biggest_single_expense': {
+      const txs = transactions.filter((t) => t.accountId === acc && t.amount < 0)
+      if (!txs.length) return { result: null }
+      const max = txs.reduce((m, t) => (t.amount < m.amount ? t : m), txs[0])
+      return { result: max, amountFormatted: Math.abs(max.amount).toLocaleString('ko-KR') + '원' }
+    }
+    default:
+      return { error: `알 수 없는 query_type: ${query_type}` }
+  }
+}
+
+// ──────────────────────────────────────────────
+// 이체 실행 (server.js에서 확인 후 호출)
+// ──────────────────────────────────────────────
+export function executeTransfer({ to_contact, amount, from_account_id = 'acc001', memo = '' }) {
+  // 실명으로 contacts 검색
+  let contact = contacts.find((c) => c.realName === to_contact)
+
+  // aliasStore에서도 검색
+  if (!contact) {
+    for (const [, v] of aliasStore) {
+      if (v.realName === to_contact) { contact = v; break }
+    }
+  }
+
+  if (!contact) {
+    return { success: false, error: `'${to_contact}' 연락처를 찾을 수 없습니다.` }
+  }
+
+  const fromAcc = accounts.find((a) => a.id === from_account_id)
+  if (!fromAcc) return { success: false, error: `출금 계좌(${from_account_id})를 찾을 수 없습니다.` }
+  if (fromAcc.balance < amount) {
+    return { success: false, error: `잔액 부족. 현재 잔액: ${fromAcc.balance.toLocaleString('ko-KR')}원` }
+  }
+
+  fromAcc.balance -= amount
+
+  const newTx = {
+    id: `t${Date.now()}`,
+    date: new Date().toISOString().slice(0, 10),
+    amount: -amount,
+    category: '송금',
+    counterpart: contact.realName,
+    accountId: from_account_id,
+    memo,
+  }
+  transactions.push(newTx)
+
+  return {
+    success: true,
+    transactionId: newTx.id,
+    from: { name: fromAcc.name, bank: fromAcc.bank, accountNo: fromAcc.accountNo },
+    to: { name: contact.realName, bank: contact.bank, accountNo: contact.accountNo },
+    amount,
+    amountFormatted: amount.toLocaleString('ko-KR') + '원',
+    newBalance: fromAcc.balance,
+    newBalanceFormatted: fromAcc.balance.toLocaleString('ko-KR') + '원',
+    memo,
+  }
+}
+
+// ──────────────────────────────────────────────
+// Tool 디스패처
+// ──────────────────────────────────────────────
+export function handleToolCall(name, input) {
+  switch (name) {
+    case 'get_balance':            return handleGetBalance(input)
+    case 'get_transactions':       return handleGetTransactions(input)
+    case 'resolve_contact':        return handleResolveContact(input)
+    case 'save_alias':             return handleSaveAlias(input)
+    case 'get_transfer_suggestion': return handleGetTransferSuggestion(input)
+    case 'get_card_transactions':   return handleGetCardTransactions(input)
+    case 'analyze_card_spending':  return handleAnalyzeCardSpending(input)
+    case 'analyze_spending':       return handleAnalyzeSpending(input)
+    case 'complex_query':          return handleComplexQuery(input)
+    default:
+      return { error: `알 수 없는 tool: ${name}` }
+  }
+}

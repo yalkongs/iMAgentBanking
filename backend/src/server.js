@@ -1,0 +1,477 @@
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import multer from 'multer'
+import { createServer } from 'http'
+import { WebSocketServer } from 'ws'
+import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
+import { toolDefinitions, handleToolCall, executeTransfer, aliasStore, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
+import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts, accounts, transactions } from './mockData.js'
+
+const app = express()
+const httpServer = createServer(app)
+
+// ──────────────────────────────────────────────
+// WebSocket 서버
+// ──────────────────────────────────────────────
+const wss = new WebSocketServer({ server: httpServer })
+// sessionId → WebSocket 클라이언트
+const wsClients = new Map()
+
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url, 'ws://localhost')
+  const sessionId = url.searchParams.get('sessionId')
+  if (sessionId) {
+    wsClients.set(sessionId, ws)
+    ws.on('close', () => wsClients.delete(sessionId))
+  }
+})
+
+function sendWsEvent(sessionId, event) {
+  const ws = wsClients.get(sessionId)
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(event))
+  }
+}
+
+function broadcastWsEvent(event) {
+  for (const ws of wsClients.values()) {
+    if (ws.readyState === 1) ws.send(JSON.stringify(event))
+  }
+}
+
+// ── 백그라운드 입출금 시뮬레이터 ──
+const BG_TRANSACTIONS = [
+  { counterpart: '국민건강보험공단', amount: -139230, category: '자동이체', memo: '건강보험료 자동이체' },
+  { counterpart: '한국전력', amount: -52400, category: '자동이체', memo: '전기요금' },
+  { counterpart: '(주)카카오뱅크', amount: 3000000, category: '이체', memo: '전세자금 입금' },
+  { counterpart: '쿠팡', amount: -87900, category: '이체', memo: '쿠팡 결제' },
+  { counterpart: '박재원', amount: 150000, category: '송금', memo: '' },
+  { counterpart: 'LG유플러스', amount: -55000, category: '자동이체', memo: '통신요금' },
+]
+
+let bgTxIndex = 0
+setInterval(async () => {
+  if (wsClients.size === 0) return
+  const tx = BG_TRANSACTIONS[bgTxIndex % BG_TRANSACTIONS.length]
+  bgTxIndex++
+  const alertId = Date.now().toString()
+  const alertData = {
+    ...tx,
+    alertId,
+    amountFormatted: (tx.amount > 0 ? '+' : '') + tx.amount.toLocaleString('ko-KR') + '원',
+    isIncome: tx.amount > 0,
+    timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+  }
+  // 1. 먼저 코멘트 없이 알림 전송
+  broadcastWsEvent({ type: 'TRANSACTION_ALERT', data: alertData })
+
+  // 2. Claude 비동기 코멘트 생성 (2500ms timeout)
+  const txDesc = `${tx.amount > 0 ? '입금' : '출금'}: ${tx.counterpart}, ${Math.abs(tx.amount).toLocaleString('ko-KR')}원, 카테고리: ${tx.category}`
+  try {
+    const commentRes = await Promise.race([
+      anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 150,
+        messages: [{
+          role: 'user',
+          content: `다음 금융 거래에 대해 친근하고 유용한 1-2문장 코멘트를 한국어로 작성하라: ${txDesc}`,
+        }],
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500)),
+    ])
+    const comment = commentRes.content[0]?.text?.trim()
+    if (comment) {
+      broadcastWsEvent({ type: 'TRANSACTION_ALERT_COMMENT', data: { alertId, comment } })
+    }
+  } catch {
+    // timeout or error — 코멘트 없이 표시 (이미 알림은 전송됨)
+  }
+}, 45000) // 45초마다
+
+// ──────────────────────────────────────────────
+// 세션 관리 (대화 히스토리 + 대기 중인 이체)
+// ──────────────────────────────────────────────
+const sessions = new Map() // sessionId → { messages: [], pendingTransfer: null }
+
+function getSession(sessionId) {
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, { messages: [], pendingTransfer: null })
+  }
+  return sessions.get(sessionId)
+}
+
+// ──────────────────────────────────────────────
+// 미들웨어
+// ──────────────────────────────────────────────
+app.use(cors())
+app.use(express.json())
+
+const upload = multer({ storage: multer.memoryStorage() })
+
+// ──────────────────────────────────────────────
+// SDK 초기화
+// ──────────────────────────────────────────────
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// ──────────────────────────────────────────────
+// System Prompt
+// ──────────────────────────────────────────────
+const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
+사용자의 자연어 요청을 정확히 파악하고 적절한 도구로 금융 업무를 처리합니다.
+
+## 이체 요청 처리 절차 (반드시 순서 준수)
+
+### STEP 1. resolve_contact 로 수신자 확인
+결과에 따라 아래 분기를 따르세요.
+
+**status:"known"** (이미 등록된 닉네임)
+→ 저장된 실명·은행 안내 후 STEP 2로 진행
+
+**status:"candidates"** (거래 이력 기반 후보 있음)
+→ 후보를 번호 목록으로 제시. 계좌번호는 accountNoMasked(뒤 4자리)만 표시.
+→ "번호로 선택해 주시면 '\${닉네임}'으로 저장하겠습니다." 안내
+→ 사용자 선택 확인 후 save_alias 저장 → STEP 2로 진행
+
+**status:"no_history"** (거래 이력 없음)
+→ "아직 \${닉네임} 계좌가 등록되어 있지 않습니다. 이름 또는 계좌번호를 알려주시면 등록해 드리겠습니다." 안내
+→ 사용자가 이름을 제공하면 → resolve_contact(이름)으로 재조회 후 "이 분이 \${닉네임}이 맞습니까?" 확인
+→ 확인 완료 후 save_alias 저장 → STEP 2로 진행
+
+### STEP 2. 금액 확인
+- 금액이 명시된 경우 → STEP 3으로 바로 진행
+- 금액 미명시 → get_transfer_suggestion(real_name) 호출
+  → "이전에 가장 자주 보내신 금액은 N원입니다. 이번에도 같은 금액으로 보내드릴까요?" 제안
+
+### STEP 3. transfer 호출
+- to_contact에는 resolve_contact 또는 save_alias로 확인된 실명을 전달
+- transfer 호출 시 사용자 확인 UI가 자동 표시됨
+
+## 일반 규칙
+- 항상 한국어로 응답하세요.
+- 도구 결과(잔액, 거래 내역, 분석 데이터)는 UI 카드로 자동 표시됩니다. 텍스트로 반복하지 마세요.
+- 도구 호출 후 응답은 1~2문장 코멘트만 하세요.
+- 조회 요청에 닉네임이 포함되면 resolve_contact 로 실명을 먼저 확인하세요.
+- 어투는 반드시 '~입니다', '~까?', '~드리겠습니다' 형식의 정중한 격식체를 사용하세요. '~요', '~해요', '~할게요' 같은 구어체는 절대 사용하지 마세요.
+- 이모지는 사용하지 마세요.
+
+## 데이터 출처 안내
+- 은행 계좌 거래내역(get_transactions): 급여·이체·자동이체·송금·이자 등 직접 거래
+- 카드 거래내역(get_card_transactions): 가맹점명만 기록, 품목 상세 불명. 마이데이터 연동 포함.
+- 지출 분석 시 카드 데이터 기반이면 "추정 카테고리 기반 집계로 실제와 다를 수 있습니다"를 반드시 안내하세요.`
+
+// ──────────────────────────────────────────────
+// POST /api/whisper — 음성 → 텍스트
+// ──────────────────────────────────────────────
+app.post('/api/whisper', upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'audio 파일이 없습니다.' })
+  }
+
+  try {
+    const file = new File([req.file.buffer], 'audio.webm', { type: req.file.mimetype })
+    const result = await openai.audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      language: 'ko',
+    })
+    res.json({ text: result.text })
+  } catch (err) {
+    console.error('Whisper error:', err)
+    res.status(500).json({ error: '음성 인식 실패', detail: err.message })
+  }
+})
+
+// ──────────────────────────────────────────────
+// GET /api/proactive — 프로액티브 알림
+// ──────────────────────────────────────────────
+app.get('/api/proactive', (req, res) => {
+  const alert = getProactiveAlert()
+  res.json({ alert })
+})
+
+// ──────────────────────────────────────────────
+// GET /api/insights — 프로액티브 AI 인사이트
+// ──────────────────────────────────────────────
+app.get('/api/insights', async (req, res) => {
+  try {
+    const [accountData, cardData] = await Promise.all([
+      Promise.resolve(handleAnalyzeSpending({})),
+      Promise.resolve(handleAnalyzeCardSpending({})),
+    ])
+    const spendingSummary = JSON.stringify({ account: accountData, card: cardData })
+
+    const result = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 400,
+      messages: [{
+        role: 'user',
+        content: `다음은 사용자의 이번 달 지출 분석 데이터입니다. 개인화된 금융 인사이트 3가지를 한국어로 작성하세요. 각 인사이트는 1-2문장, 구체적 수치 포함. 포맷: JSON array of strings. 데이터: ${spendingSummary}`,
+      }],
+    })
+
+    const text = result.content[0]?.text?.trim() || '[]'
+    // JSON array 파싱 (마크다운 코드블록 제거)
+    const cleaned = text.replace(/^```json\s*|\s*```$/g, '').trim()
+    let insights = []
+    try { insights = JSON.parse(cleaned) } catch { insights = [] }
+    if (!Array.isArray(insights)) insights = []
+
+    res.json({ insights })
+  } catch (err) {
+    console.error('Insights error:', err)
+    res.json({ insights: [] })
+  }
+})
+
+// ──────────────────────────────────────────────
+// POST /api/reset-mock — mock 데이터 초기화
+// ──────────────────────────────────────────────
+app.post('/api/reset-mock', (req, res) => {
+  const freshAccounts = getInitialAccounts()
+  accounts.length = 0
+  accounts.push(...freshAccounts)
+
+  const freshTransactions = getInitialTransactions()
+  transactions.length = 0
+  transactions.push(...freshTransactions)
+
+  aliasStore.clear()
+
+  res.json({ success: true })
+})
+
+// ──────────────────────────────────────────────
+// POST /api/chat — Claude Tool Use + SSE 스트리밍
+// ──────────────────────────────────────────────
+app.post('/api/chat', async (req, res) => {
+  const { message, sessionId = 'default' } = req.body
+  if (!message) return res.status(400).json({ error: 'message가 없습니다.' })
+
+  // SSE 헤더
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  const sendSSE = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
+
+  const session = getSession(sessionId)
+  session.messages.push({ role: 'user', content: message })
+
+  try {
+    let continueLoop = true
+
+    while (continueLoop) {
+      let fullText = ''
+      let toolUses = []
+      let currentToolUse = null
+
+      // Claude 스트리밍 요청
+      const stream = anthropic.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: SYSTEM_PROMPT,
+        tools: toolDefinitions,
+        messages: session.messages,
+      })
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          if (event.content_block.type === 'tool_use') {
+            currentToolUse = {
+              id: event.content_block.id,
+              name: event.content_block.name,
+              inputJson: '',
+            }
+          }
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'text_delta') {
+            fullText += event.delta.text
+            sendSSE({ type: 'text', delta: event.delta.text })
+          } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
+            currentToolUse.inputJson += event.delta.partial_json
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (currentToolUse) {
+            try {
+              currentToolUse.input = JSON.parse(currentToolUse.inputJson || '{}')
+            } catch {
+              currentToolUse.input = {}
+            }
+            toolUses.push(currentToolUse)
+            currentToolUse = null
+          }
+        } else if (event.type === 'message_stop') {
+          continueLoop = false
+        }
+      }
+
+      const finalMsg = await stream.finalMessage()
+
+      // assistant 메시지 기록
+      session.messages.push({ role: 'assistant', content: finalMsg.content })
+
+      // stop_reason 확인
+      if (finalMsg.stop_reason === 'tool_use') {
+        continueLoop = true
+        const toolResults = []
+
+        for (const tu of toolUses) {
+          sendSSE({ type: 'tool_call', name: tu.name, input: tu.input })
+
+          // ── UI 카드 생성 대상 tool ──
+          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion']
+
+          // ── resolve_contact candidates → 선택 카드 ──
+          if (tu.name === 'resolve_contact') {
+            const result = handleToolCall('resolve_contact', tu.input)
+            toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) })
+            if (result.status === 'candidates') {
+              sendSSE({ type: 'ui_card', cardType: 'resolve_contact_candidates', data: result })
+            }
+            continue
+          }
+
+          // ── transfer 인터셉트 ──
+          if (tu.name === 'transfer') {
+            const { to_contact, amount, from_account_id = 'acc001', memo = '' } = tu.input
+
+            // 실명으로 contacts 검색, 없으면 aliasStore에서 실명으로 검색
+            let contact = contacts.find((c) => c.realName === to_contact) || null
+            if (!contact) {
+              for (const [, v] of aliasStore) {
+                if (v.realName === to_contact) { contact = v; break }
+              }
+            }
+
+            const pendingData = {
+              toolUseId: tu.id,
+              to_contact,
+              amount,
+              from_account_id,
+              memo,
+              contactInfo: contact || null,
+            }
+            session.pendingTransfer = pendingData
+
+            // WebSocket으로 프론트엔드에 확인 요청
+            sendWsEvent(sessionId, {
+              type: 'PENDING_TRANSFER',
+              data: {
+                to_contact,
+                amount,
+                amountFormatted: amount.toLocaleString('ko-KR') + '원',
+                from_account_id,
+                memo,
+                contactInfo: contact,
+                availableAccounts: accounts
+                  .filter((a) => a.type === '입출금' || a.type === 'CMA')
+                  .map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                    balance: a.balance,
+                    balanceFormatted: a.balance.toLocaleString('ko-KR') + '원',
+                  })),
+              },
+            })
+
+            // Claude에게 "사용자 확인 대기 중" 메시지를 tool_result 로 전달
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                status: 'pending_confirmation',
+                message: `${to_contact}에게 ${amount.toLocaleString('ko-KR')}원 이체 확인을 사용자에게 요청했습니다. 사용자가 확인 버튼을 누르면 이체가 실행됩니다.`,
+              }),
+            })
+
+            sendSSE({ type: 'transfer_pending', data: pendingData })
+          } else {
+            // 일반 tool 실행
+            const result = handleToolCall(tu.name, tu.input)
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: tu.id,
+              content: JSON.stringify(result),
+            })
+            // UI 카드 이벤트 전송
+            if (UI_CARD_TOOLS.includes(tu.name)) {
+              sendSSE({ type: 'ui_card', cardType: tu.name, data: result })
+            }
+          }
+        }
+
+        // tool_results 를 messages 에 추가
+        session.messages.push({ role: 'user', content: toolResults })
+      } else {
+        // end_turn — 루프 종료
+        continueLoop = false
+      }
+    }
+
+    sendSSE({ type: 'done' })
+    res.end()
+  } catch (err) {
+    console.error('Chat error:', err)
+    sendSSE({ type: 'error', message: err.message })
+    res.end()
+  }
+})
+
+// ──────────────────────────────────────────────
+// POST /api/confirm-transfer — 이체 확인
+// ──────────────────────────────────────────────
+app.post('/api/confirm-transfer', async (req, res) => {
+  const { sessionId = 'default', confirmed, from_account_id: selectedAccountId } = req.body
+  const session = getSession(sessionId)
+
+  if (!session.pendingTransfer) {
+    return res.status(400).json({ error: '대기 중인 이체가 없습니다.' })
+  }
+
+  const pending = session.pendingTransfer
+  session.pendingTransfer = null
+
+  if (!confirmed) {
+    sendWsEvent(sessionId, { type: 'TRANSFER_CANCELLED' })
+    return res.json({ success: false, cancelled: true, message: '이체가 취소되었습니다.' })
+  }
+
+  // 실제 이체 실행 (프론트에서 선택한 계좌 우선)
+  const result = executeTransfer({
+    to_contact: pending.to_contact,
+    amount: pending.amount,
+    from_account_id: selectedAccountId || pending.from_account_id,
+    memo: pending.memo,
+  })
+
+  if (result.success) {
+    sendWsEvent(sessionId, {
+      type: 'TRANSFER_COMPLETE',
+      data: result,
+    })
+    res.json({ success: true, result })
+  } else {
+    sendWsEvent(sessionId, { type: 'TRANSFER_FAILED', error: result.error })
+    res.status(400).json({ success: false, error: result.error })
+  }
+})
+
+// ──────────────────────────────────────────────
+// POST /api/reset — 세션 초기화
+// ──────────────────────────────────────────────
+app.post('/api/reset', (req, res) => {
+  const { sessionId = 'default' } = req.body
+  sessions.delete(sessionId)
+  res.json({ success: true })
+})
+
+// ──────────────────────────────────────────────
+// 서버 시작
+// ──────────────────────────────────────────────
+const PORT = process.env.PORT || 3001
+httpServer.listen(PORT, () => {
+  console.log(`✅ 서버 실행 중: http://localhost:${PORT}`)
+})
