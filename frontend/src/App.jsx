@@ -168,6 +168,8 @@ export default function App() {
   const textareaRef = useRef(null)
   const streamingIdRef = useRef(null)
   const prevMsgCountRef = useRef(0)
+  // GUI 드릴-다운에서 발생한 메시지를 scope별로 제거하기 위한 ref
+  const currentGuiScopeRef = useRef(null)
 
   // 컨텍스트 숏컷 계산
   const currentShortcuts = CONTEXTUAL_SHORTCUTS[lastCardType] || CONTEXTUAL_SHORTCUTS.default
@@ -318,10 +320,18 @@ export default function App() {
     }
   }, []))
 
+  // GUI 드릴-다운 scope 메시지 일괄 제거
+  const removeGuiScope = useCallback((scopeId) => {
+    if (!scopeId) return
+    setMessages((prev) => prev.filter((m) => m.guiScope !== scopeId))
+  }, [])
+
   // 메시지 전송
-  const sendMessage = useCallback(async (text) => {
+  const sendMessage = useCallback(async (text, guiScope = null) => {
     const msg = text.trim()
     if (!msg || isLoading) return
+
+    currentGuiScopeRef.current = guiScope
 
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -330,14 +340,14 @@ export default function App() {
 
     setMessages((prev) => [
       ...prev,
-      { id: 'user_' + Date.now(), role: 'user', type: 'text', text: msg },
+      { id: 'user_' + Date.now(), role: 'user', type: 'text', text: msg, guiScope },
     ])
 
     const assistantId = 'assistant_' + Date.now()
     streamingIdRef.current = assistantId
     setMessages((prev) => [
       ...prev,
-      { id: assistantId, role: 'assistant', type: 'text', text: '', streaming: true },
+      { id: assistantId, role: 'assistant', type: 'text', text: '', streaming: true, guiScope },
     ])
 
     let finalText = ''
@@ -378,7 +388,7 @@ export default function App() {
             } else if (data.type === 'ui_card') {
               setMessages((prev) => [
                 ...prev,
-                { id: 'card_' + Date.now() + Math.random(), type: 'ui_card', cardType: data.cardType, data: data.data },
+                { id: 'card_' + Date.now() + Math.random(), type: 'ui_card', cardType: data.cardType, data: data.data, guiScope: currentGuiScopeRef.current },
               ])
               setLastCardType(data.cardType)
               // voiceMode Path 2: ui_card 수신 시 요약 TTS
@@ -431,6 +441,7 @@ export default function App() {
       )
     } finally {
       setIsLoading(false)
+      currentGuiScopeRef.current = null
     }
   }, [isLoading, sessionId, ttsEnabled])
 
@@ -720,6 +731,7 @@ export default function App() {
                 sessionId={sessionId}
                 onQuickAction={sendMessage}
                 onTransferDone={() => {}}
+                onClearScope={removeGuiScope}
                 voiceMode={voiceMode}
               />
             ))}

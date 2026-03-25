@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -105,17 +105,36 @@ function AccountDetailView({ accountId, onBack, onQuickAction }) {
   )
 }
 
-export default function BalanceCard({ data, onQuickAction, initialAccountId }) {
+export default function BalanceCard({ data, onQuickAction, onClearScope, guiScope: cardGuiScope, initialAccountId }) {
   const accounts = data.accounts || []
   const [selectedId, setSelectedId] = useState(initialAccountId || null)
+  // 이 카드에서 드릴-다운 시 생성되는 메시지의 scope ID
+  const detailScopeRef = useRef(null)
+
+  function drillIn(accId) {
+    // 기존 detail scope가 있으면 먼저 제거 (다른 계좌로 재진입)
+    if (detailScopeRef.current) {
+      onClearScope?.(detailScopeRef.current)
+    }
+    detailScopeRef.current = `balance-detail-${accId}-${Date.now()}`
+    setSelectedId(accId)
+  }
+
+  function drillOut() {
+    if (detailScopeRef.current) {
+      onClearScope?.(detailScopeRef.current)
+      detailScopeRef.current = null
+    }
+    setSelectedId(null)
+  }
 
   if (selectedId) {
     return (
       <div className="ui-card balance-card">
         <AccountDetailView
           accountId={selectedId}
-          onBack={() => setSelectedId(null)}
-          onQuickAction={onQuickAction}
+          onBack={drillOut}
+          onQuickAction={(text) => onQuickAction?.(text, detailScopeRef.current)}
         />
       </div>
     )
@@ -138,7 +157,7 @@ export default function BalanceCard({ data, onQuickAction, initialAccountId }) {
               key={acc.id}
               className="acct-obj"
               style={{ '--acct-accent': cfg.accent, '--acct-bg': cfg.bg, '--acct-border': cfg.border }}
-              onClick={() => setSelectedId(acc.id)}
+              onClick={() => drillIn(acc.id)}
             >
               <div className="acct-obj-top">
                 <span className="acct-obj-badge">{cfg.label}</span>
