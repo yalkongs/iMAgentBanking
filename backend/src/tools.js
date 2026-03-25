@@ -1,6 +1,18 @@
 import { accounts, contacts, transactions, cards, cardTransactions, savingsProducts, SAVINGS_TARGETS } from './mockData.js'
 
 // ──────────────────────────────────────────────
+// 로컬 날짜 문자열 헬퍼 (타임존 버그 방지)
+// new Date().toISOString()은 UTC 기준이므로 KST(+9)에서
+// 자정 이후 1시간 안에 실행하면 하루 전 날짜가 나옴.
+// ──────────────────────────────────────────────
+function localDateStr(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+// ──────────────────────────────────────────────
 // 닉네임 → 실제 계좌 매핑 스토어 (메모리 내 영속)
 // { nickname → { realName, bank, accountNo } }
 // ──────────────────────────────────────────────
@@ -480,9 +492,9 @@ function handleGetCardTransactions({
 
 export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group_by = 'inferredCategory' }) {
   const now = new Date()
-  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const defaultStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const s = start_date || defaultStart
-  const e = end_date || now.toISOString().slice(0, 10)
+  const e = end_date || localDateStr(now)
 
   let txs = cardTransactions.filter((t) => t.amount < 0 && t.date >= s && t.date <= e)
   if (card_id) txs = txs.filter((t) => t.cardId === card_id)
@@ -521,9 +533,9 @@ export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group
 
 export function handleAnalyzeSpending({ start_date, end_date, group_by = 'category' }) {
   const now = new Date()
-  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+  const defaultStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const s = start_date || defaultStart
-  const e = end_date || now.toISOString().slice(0, 10)
+  const e = end_date || localDateStr(now)
 
   const txs = transactions.filter((t) =>
     t.accountId === 'acc001' && t.amount < 0 && t.date >= s && t.date <= e
@@ -552,9 +564,9 @@ export function handleAnalyzeSpending({ start_date, end_date, group_by = 'catego
 
 function handleComplexQuery({ query_type, category }) {
   const now = new Date()
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10)
-  const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10)
+  const thisMonthStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
+  const lastMonthStart = localDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+  const lastMonthEnd   = localDateStr(new Date(now.getFullYear(), now.getMonth(), 0))
   const acc = 'acc001'
 
   switch (query_type) {
@@ -635,7 +647,7 @@ export function executeTransfer({ to_contact, amount, from_account_id = 'acc001'
 
   const newTx = {
     id: `t${Date.now()}`,
-    date: new Date().toISOString().slice(0, 10),
+    date: localDateStr(new Date()),
     amount: -amount,
     category: '송금',
     counterpart: contact.realName,

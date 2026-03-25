@@ -148,7 +148,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 async function archiveConversation({ sessionId, userMessage, assistantText, toolCalls }) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return
   const now = new Date()
-  const dateStr = now.toISOString().slice(0, 10)           // e.g. 2026-03-25
+  const dateStr = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')].join('-')
   const entry = {
     id: `${sessionId}-${now.getTime()}`,
     sessionId,
