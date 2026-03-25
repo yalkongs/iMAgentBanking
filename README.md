@@ -1,6 +1,6 @@
 # iMAgentBanking
 
-iM뱅크 AI 금융 어시스턴트 데모 앱. 자연어로 잔액 조회, 이체, 지출 분석을 수행하며 Claude AI와 실시간으로 대화합니다.
+iM뱅크 AI 금융 어시스턴트 데모 앱. 자연어로 잔액 조회, 이체, 지출 분석을 수행하며 AI와 실시간으로 대화합니다.
 
 **Live Demo**: https://frontend-seven-beta-54.vercel.app
 
