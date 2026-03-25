@@ -2765,3 +2765,398 @@ input:focus-visible, textarea:focus-visible {
   text-transform: uppercase;
 }
 
+
+/* ──────────────────────────────────────────────
+   VoiceOverlay
+   ────────────────────────────────────────────── */
+.voice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(13, 15, 26, 0.96);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-overlay-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.voice-overlay-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.voice-overlay-label {
+  color: var(--text-secondary);
+  font-size: 15px;
+  text-align: center;
+}
+
+.voice-mic-btn {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-border);
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+.voice-mic-btn--active {
+  background: rgba(0, 201, 167, 0.3);
+  border-color: var(--accent);
+  animation: voice-pulse 1.5s ease-in-out infinite;
+}
+.voice-mic-btn--error {
+  border-color: var(--error);
+  color: var(--error);
+  background: var(--error-dim);
+}
+
+@keyframes voice-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+.voice-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--accent-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.voice-waveform {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+}
+.voice-bar {
+  display: inline-block;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: wave-bounce 0.8s ease-in-out infinite alternate;
+  height: 16px;
+}
+.voice-waveform--speaking .voice-bar {
+  background: #7dd3fc;
+}
+
+@keyframes wave-bounce {
+  from { transform: scaleY(0.4); }
+  to   { transform: scaleY(1.4); }
+}
+
+/* ──────────────────────────────────────────────
+   SavingsInsightCard
+   ────────────────────────────────────────────── */
+.savings-insight-card {
+  background: var(--bg-card);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin: 4px 0;
+}
+
+.sic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.sic-period {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sic-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.sic-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.sic-total-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.sic-total-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.sic-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.sic-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.sic-category {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sic-saveable {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--success);
+}
+.sic-bar-wrap {
+  height: 5px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+.sic-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.sic-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sic-cta {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
+}
+.sic-cta:hover { background: rgba(0, 201, 167, 0.25); }
+
+.sic-empty {
+  padding: 28px 20px;
+  text-align: center;
+}
+.sic-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.sic-empty-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ──────────────────────────────────────────────
+   ProductCompareCard
+   ────────────────────────────────────────────── */
+.product-compare-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: 4px 0;
+}
+
+.pcc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+}
+.pcc-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.pcc-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Hero — 추천 상품 */
+.pcc-hero {
+  background: linear-gradient(135deg, rgba(0, 201, 167, 0.12) 0%, rgba(0, 201, 167, 0.04) 100%);
+  border-top: 1px solid var(--accent-border);
+  border-bottom: 1px solid var(--border);
+  padding: 18px;
+}
+.pcc-hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.pcc-rec-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+.pcc-bank {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.pcc-product-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+.pcc-hero-stats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.pcc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pcc-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pcc-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.pcc-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin-bottom: 14px;
+}
+.pcc-features li {
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.pcc-cta {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #0D0F1A;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.pcc-cta:hover { background: var(--accent-hover); }
+
+/* 비교 행 */
+.pcc-compare {
+  padding: 14px 18px;
+}
+.pcc-compare-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.pcc-compare-row {
+  display: flex;
+  gap: 10px;
+}
+.pcc-compare-item {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pcc-compare-bank { font-size: 10px; color: var(--text-muted); }
+.pcc-compare-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.pcc-compare-rate { font-size: 14px; font-weight: 700; color: var(--warning); }
+.pcc-compare-maturity { font-size: 11px; color: var(--text-secondary); }
+
+.pcc-empty {
+  padding: 28px 20px;
+  text-align: center;
+}
+.pcc-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.pcc-empty-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
+.pcc-retry {
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* TransferCard voice hint */
+.transfer-voice-hint {
+  font-size: 13px;
+  color: var(--accent);
+  text-align: center;
+  padding: 8px 0 4px;
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

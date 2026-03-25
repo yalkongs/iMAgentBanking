@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Message from './components/Message.jsx'
 import AnimatedBackground from './components/AnimatedBackground.jsx'
 import DrawerBanner from './components/DrawerBanner.jsx'
+import VoiceOverlay from './components/VoiceOverlay.jsx'
 import { useWebSocket } from './hooks/useWebSocket.js'
 import { useVoiceInput } from './hooks/useVoiceInput.js'
 
@@ -87,8 +88,15 @@ const DEMO_MESSAGES = [
   '엄마한테 5만원 보내줘',
 ]
 
+// 음성 데모 시나리오
+const VOICE_DEMO_MESSAGES = [
+  '엄마한테 5만원 보내줘',
+  '이번 달 얼마 절약할 수 있어?',
+  '적금 뭐가 좋아?',
+]
+
 // ── TTS 헬퍼 ──
-function speakKorean(text, rate = 1.05) {
+function speakKorean(text, rate = 1.05, onEnd = null) {
   if (!window.speechSynthesis || !text) return
   window.speechSynthesis.cancel()
   const utt = new SpeechSynthesisUtterance(text)
@@ -97,6 +105,7 @@ function speakKorean(text, rate = 1.05) {
   utt.pitch = 1.0
   // 너무 긴 텍스트는 첫 100자만
   utt.text = text.length > 120 ? text.slice(0, 120) + '.' : text
+  if (onEnd) utt.onend = onEnd
   window.speechSynthesis.speak(utt)
 }
 
@@ -129,6 +138,15 @@ export default function App() {
   const demoQueueRef = useRef([])
   const demoTimeoutRef = useRef(null)
   const prevLoadingRef = useRef(false)
+
+  // 음성 모드
+  const [voiceMode, setVoiceMode] = useState(false)
+  const [isTtsSpeaking, setIsTtsSpeaking] = useState(false)
+  const voiceModeRef = useRef(false)
+  const pendingDemoRef = useRef(false)
+
+  // voiceModeRef를 최신 voiceMode와 동기화
+  useEffect(() => { voiceModeRef.current = voiceMode }, [voiceMode])
 
   // 상단 오버레이 입출금 알림
   const [txNotif, setTxNotif] = useState(null)
@@ -248,6 +266,8 @@ export default function App() {
   // WebSocket — 이벤트 처리
   useWebSocket(sessionId, useCallback((event) => {
     if (event.type === 'PENDING_TRANSFER') {
+      // voiceMode일 때 녹음 일시 정지 → useVoiceConfirm이 처리
+      if (voiceModeRef.current) stopRecording()
       const msgId = 'transfer_' + Date.now()
       setMessages((prev) => [
         ...prev,
@@ -361,14 +381,32 @@ export default function App() {
                 { id: 'card_' + Date.now() + Math.random(), type: 'ui_card', cardType: data.cardType, data: data.data },
               ])
               setLastCardType(data.cardType)
+              // voiceMode Path 2: ui_card 수신 시 요약 TTS
+              if (voiceModeRef.current) {
+                const summaryMap = {
+                  get_balance: '잔액을 확인했습니다.',
+                  get_savings_advice: '절약 분석 결과를 확인해보세요.',
+                  compare_products: 'iM뱅크 추천 적금 상품을 확인해보세요.',
+                  get_transactions: '거래 내역입니다.',
+                  analyze_spending: '지출 분석 결과입니다.',
+                }
+                const summary = summaryMap[data.cardType]
+                if (summary) {
+                  setIsTtsSpeaking(true)
+                  speakKorean(summary, 1.0, () => setIsTtsSpeaking(false))
+                }
+              }
             } else if (data.type === 'done') {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId ? { ...m, streaming: false } : m
                 )
               )
-              // TTS: 짧은 텍스트 응답만 읽기
-              if (ttsEnabled && finalText && finalText.length < 200) {
+              // voiceMode Path 1 억제: ui_card TTS(Path 2)와 충돌 방지
+              if (voiceModeRef.current) {
+                // voiceMode에서는 Path 2(ui_card TTS)만 사용
+              } else if (ttsEnabled && finalText && finalText.length < 200) {
+                // 일반 TTS Path 1
                 speakKorean(finalText)
               }
             } else if (data.type === 'error') {
@@ -396,16 +434,31 @@ export default function App() {
     }
   }, [isLoading, sessionId, ttsEnabled])
 
-  // 데모 모드: isLoading false 전환 시 다음 큐 실행
+  // 데모 모드: isLoading false 전환 시 다음 큐 실행 (TTS 완료 대기)
   useEffect(() => {
     if (prevLoadingRef.current && !isLoading && demoMode) {
+      if (demoQueueRef.current.length > 0) {
+        if (!isTtsSpeaking) {
+          const next = demoQueueRef.current.shift()
+          sendMessage(next)
+        } else {
+          pendingDemoRef.current = true // TTS 끝나면 발송
+        }
+      }
+    }
+    prevLoadingRef.current = isLoading
+  }, [isLoading, demoMode, sendMessage, isTtsSpeaking])
+
+  // TTS 완료 → 대기 중인 데모 메시지 발송
+  useEffect(() => {
+    if (!isTtsSpeaking && pendingDemoRef.current && demoMode && !isLoading) {
+      pendingDemoRef.current = false
       if (demoQueueRef.current.length > 0) {
         const next = demoQueueRef.current.shift()
         sendMessage(next)
       }
     }
-    prevLoadingRef.current = isLoading
-  }, [isLoading, demoMode, sendMessage])
+  }, [isTtsSpeaking, demoMode, isLoading, sendMessage])
 
   // 데모 모드: ContactCandidatesCard 자동 선택 / TransferCard 정지
   useEffect(() => {
@@ -439,6 +492,21 @@ export default function App() {
       setDemoMode(false)
     }, 15000)
     sendMessage(DEMO_MESSAGES[0])
+  }
+
+  // 음성 데모 시작
+  function startVoiceDemo() {
+    setMenuOpen(false)
+    setVoiceMode(true)
+    setTtsEnabled(true)
+    demoQueueRef.current = [...VOICE_DEMO_MESSAGES.slice(1)]
+    setDemoMode(true)
+    demoTimeoutRef.current = setTimeout(() => {
+      demoQueueRef.current = []
+      setDemoMode(false)
+      setVoiceMode(false)
+    }, 30000)
+    sendMessage(VOICE_DEMO_MESSAGES[0])
   }
 
   // mock 데이터 리셋
@@ -481,7 +549,7 @@ export default function App() {
     if (window.speechSynthesis) window.speechSynthesis.cancel()
   }
 
-  const { isRecording, toggleRecording, error: voiceError } = useVoiceInput(
+  const { isRecording, toggleRecording, stopRecording, error: voiceError } = useVoiceInput(
     useCallback((text) => {
       setInput(text)
       textareaRef.current?.focus()
@@ -570,6 +638,9 @@ export default function App() {
                   <button className="dropdown-item" onClick={startDemo}>
                     ▷ 자동실행
                   </button>
+                  <button className="dropdown-item" onClick={startVoiceDemo}>
+                    ◎ 음성 데모
+                  </button>
                   <button className="dropdown-item" onClick={handleResetMock}>
                     ⟳ 리셋
                   </button>
@@ -649,6 +720,7 @@ export default function App() {
                 sessionId={sessionId}
                 onQuickAction={sendMessage}
                 onTransferDone={() => {}}
+                voiceMode={voiceMode}
               />
             ))}
             {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
@@ -687,6 +759,21 @@ export default function App() {
             </button>
           ))}
         </div>
+      )}
+
+      {/* 음성 오버레이 */}
+      {voiceMode && (
+        <VoiceOverlay
+          state={isTtsSpeaking ? 'SPEAKING' : isLoading ? 'PROCESSING' : isRecording ? 'RECORDING' : 'IDLE'}
+          onClose={() => {
+            setVoiceMode(false)
+            setDemoMode(false)
+            demoQueueRef.current = []
+            if (window.speechSynthesis) window.speechSynthesis.cancel()
+            setIsTtsSpeaking(false)
+          }}
+          onMicTap={toggleRecording}
+        />
       )}
 
       {/* 입력 영역 */}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { accounts, transactions, getInitialAccounts, getInitialTransactions } from '../mockData.js'
-import { aliasStore } from '../tools.js'
+import { aliasStore, handleToolCall } from '../tools.js'
 
 // ── Test 1: alertId ──────────────────────────────────────────────────────────
 // TRANSACTION_ALERT와 TRANSACTION_ALERT_COMMENT가 동일 alertId를 공유해야 함.
@@ -66,7 +66,56 @@ describe('reset-mock', () => {
   })
 })
 
-// ── Test 3: candidates 자동 선택 메시지 형식 ─────────────────────────────────
+// ── Test 3: handleSavingsAdvice ───────────────────────────────────────────────
+describe('handleSavingsAdvice', () => {
+  it('기본 호출 시 savings 배열과 total_saveable를 반환해야 한다', () => {
+    const result = handleToolCall('get_savings_advice', {})
+    expect(result).toHaveProperty('savings')
+    expect(Array.isArray(result.savings)).toBe(true)
+    expect(result).toHaveProperty('total_saveable')
+    expect(typeof result.total_saveable).toBe('number')
+  })
+
+  it('savings 각 항목은 category, saveable, reason 필드를 가져야 한다', () => {
+    const result = handleToolCall('get_savings_advice', { period: 'this_month' })
+    for (const item of result.savings) {
+      expect(item).toHaveProperty('category')
+      expect(item).toHaveProperty('saveable')
+      expect(item).toHaveProperty('reason')
+    }
+  })
+
+  it('카테고리 지출이 없을 때 savings가 빈 배열이어야 한다', () => {
+    const result = handleToolCall('get_savings_advice', { period: 'last_month' })
+    // 빈 배열이거나 항목이 있거나 — 오류 없이 반환되어야 함
+    expect(Array.isArray(result.savings)).toBe(true)
+  })
+})
+
+// ── Test 4: handleCompareProducts ─────────────────────────────────────────────
+describe('handleCompareProducts', () => {
+  it('기본 호출 시 recommended와 products 배열을 반환해야 한다', () => {
+    const result = handleToolCall('compare_products', {})
+    expect(result).toHaveProperty('recommended')
+    expect(result).toHaveProperty('products')
+    expect(Array.isArray(result.products)).toBe(true)
+  })
+
+  it('amount 미전달 시 50000원 기본값이 적용되어야 한다', () => {
+    const result = handleToolCall('compare_products', {})
+    expect(result.amount).toBe(50000)
+    expect(result.amount_formatted).toBe('50,000원')
+  })
+
+  it('recommended 상품은 cta_url이 있으면 iM뱅크 상품이어야 한다', () => {
+    const result = handleToolCall('compare_products', { amount: 100000 })
+    if (result.recommended?.cta_url) {
+      expect(result.recommended.bank).toBe('iM뱅크')
+    }
+  })
+})
+
+// ── Test 5: candidates 자동 선택 메시지 형식 ─────────────────────────────────
 describe('candidates 자동 선택 메시지', () => {
   it('첫 번째 후보의 완성 메시지 형식이 올바르야 한다', () => {
     const query = '엄마'

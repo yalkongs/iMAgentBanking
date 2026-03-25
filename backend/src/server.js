@@ -232,6 +232,9 @@ app.post('/api/whisper', upload.single('audio'), async (req, res) => {
     res.json({ text: result.text })
   } catch (err) {
     console.error('Whisper error:', err)
+    if (err.status === 429 || (err.message && err.message.includes('429'))) {
+      return res.status(503).json({ error: '음성 인식 서비스가 잠시 혼잡합니다. 잠시 후 다시 시도해 주세요.' })
+    }
     res.status(500).json({ error: '음성 인식 실패', detail: err.message })
   }
 })
@@ -396,7 +399,7 @@ app.post('/api/chat', async (req, res) => {
           sendSSE({ type: 'tool_call', name: tu.name, input: tu.input })
 
           // ── UI 카드 생성 대상 tool ──
-          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story']
+          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story', 'get_savings_advice', 'compare_products']
 
           // ── resolve_contact candidates → 선택 카드 ──
           if (tu.name === 'resolve_contact') {

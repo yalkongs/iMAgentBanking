@@ -493,3 +493,56 @@ export function getInitialAccounts() {
 export function getInitialTransactions() {
   return structuredClone(_initialTransactions)
 }
+
+// ──────────────────────────────────────────────
+// 절약 목표 기준 (카테고리별 권장 비율 + 이유)
+// ──────────────────────────────────────────────
+export const SAVINGS_TARGETS = {
+  '카페':   { ratio: 0.6, reason: '주 3회 이하로 줄이면 절약 가능' },
+  '구독':   { ratio: 0.5, reason: 'Netflix+Wavve 중복 구독 감지' },
+  '쇼핑':   { ratio: 0.7, reason: '월 평균 대비 초과 지출' },
+  '식비':   { ratio: 0.8, reason: '외식 비중 높음' },
+  '문화':   { ratio: 0.75, reason: '월 2회 이하 문화생활 권장' },
+}
+
+// ──────────────────────────────────────────────
+// 금융상품 비교 데이터
+// ──────────────────────────────────────────────
+export const savingsProducts = [
+  {
+    id: 'imbank-001',
+    bank: 'iM뱅크',
+    name: '정기적금',
+    rate: 4.2,
+    term: 6,
+    min: 10000,
+    max: 500000,
+    cta_url: 'imbank://savings/apply',
+    features: ['높은 금리', '6개월 단기', '모바일 가입'],
+    recommended: true,
+  },
+  {
+    id: 'kakao-001',
+    bank: '카카오뱅크',
+    name: '자유적금',
+    rate: 3.8,
+    term: 6,
+    min: 1000,
+    max: 300000,
+    cta_url: null,
+    features: ['자유 납입', '소액 가입 가능'],
+    recommended: false,
+  },
+  {
+    id: 'toss-001',
+    bank: '토스뱅크',
+    name: '목돈굴리기',
+    rate: 3.5,
+    term: 6,
+    min: 10000,
+    max: 1000000,
+    cta_url: null,
+    features: ['대용량 한도', '자동 이체'],
+    recommended: false,
+  },
+]

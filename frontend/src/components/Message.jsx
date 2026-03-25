@@ -10,14 +10,17 @@ import TransferReceiptCard from './TransferReceiptCard.jsx'
 import TransactionAlertCard from './TransactionAlertCard.jsx'
 import FinancialMomentCard from './FinancialMomentCard.jsx'
 import FinancialStoryCard from './FinancialStoryCard.jsx'
+import SavingsInsightCard from './SavingsInsightCard.jsx'
+import ProductCompareCard from './ProductCompareCard.jsx'
 
-export default function Message({ msg, sessionId, onTransferDone, onQuickAction }) {
+export default function Message({ msg, sessionId, onTransferDone, onQuickAction, voiceMode }) {
   // 이체 확인 카드
   if (msg.type === 'transfer_pending') {
     return (
       <TransferCard
         data={msg.data}
         sessionId={sessionId}
+        voiceMode={voiceMode}
         onDone={(confirmed, result) => onTransferDone(confirmed, result, msg.id)}
       />
     )
@@ -60,6 +63,17 @@ export default function Message({ msg, sessionId, onTransferDone, onQuickAction 
     if (cardType === 'monthly_story') return <FinancialStoryCard data={data} />
     if (cardType === 'complex_query' || cardType === 'get_recent_transfer') {
       return <InsightCard cardType={cardType} data={data} />
+    }
+    if (cardType === 'get_savings_advice') {
+      return (
+        <SavingsInsightCard
+          data={data}
+          onCta={(amount) => onQuickAction(`이번 달 절약 가능 금액 ${amount.toLocaleString('ko-KR')}원으로 적금 상품 비교해줘`)}
+        />
+      )
+    }
+    if (cardType === 'compare_products') {
+      return <ProductCompareCard data={data} />
     }
     return null
   }

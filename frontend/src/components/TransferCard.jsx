@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { useVoiceConfirm } from '../hooks/useVoiceConfirm.js'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
@@ -101,15 +102,25 @@ function SwipeConfirm({ onConfirm, disabled }) {
   )
 }
 
-export default function TransferCard({ data, sessionId, onDone }) {
+export default function TransferCard({ data, sessionId, onDone, voiceMode }) {
   const { to_contact, amountFormatted, from_account_id, memo, contactInfo, availableAccounts } = data
 
   const accounts = availableAccounts || [{ id: from_account_id, name: '주계좌 (입출금)', balanceFormatted: '' }]
   const [selectedId, setSelectedId] = useState(from_account_id || accounts[0]?.id)
   const [status, setStatus] = useState('pending') // pending | confirming | done
+  const [voiceHint, setVoiceHint] = useState(voiceMode ? '"네" 또는 "아니오"라고 말씀해 주세요' : null)
 
   const selectedAccount = accounts.find((a) => a.id === selectedId) || accounts[0]
   const isInsufficient = selectedAccount?.balance != null && selectedAccount.balance < data.amount
+
+  // 음성 확인 (voiceMode일 때 자동 활성화)
+  useVoiceConfirm({
+    isActive: voiceMode && status === 'pending',
+    onConfirm: () => handleConfirm(true),
+    onCancel: () => handleConfirm(false),
+    onTimeout: () => setVoiceHint('음성 인식 시간이 초과되었습니다. 버튼을 눌러 확인해 주세요.'),
+    timeoutMs: 5000,
+  })
 
   async function handleConfirm(confirmed) {
     setStatus('confirming')
@@ -132,6 +143,7 @@ export default function TransferCard({ data, sessionId, onDone }) {
   return (
     <div className="transfer-card">
       <div className="transfer-card-label">이체 확인</div>
+      {voiceHint && <div className="transfer-voice-hint">{voiceHint}</div>}
       <div className="transfer-amount-hero">{amountFormatted}</div>
 
       {/* 수신자 정보 */}

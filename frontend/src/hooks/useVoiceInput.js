@@ -120,5 +120,10 @@ export function useVoiceInput(onTranscript) {
     }
   }, [isRecording, startStreaming, stopStreaming, startWhisper, stopWhisper])
 
-  return { isRecording, toggleRecording, error }
+  const stopRecording = useCallback(() => {
+    if (hasSpeechAPI) stopStreaming()
+    else stopWhisper()
+  }, [stopStreaming, stopWhisper])
+
+  return { isRecording, toggleRecording, stopRecording, error }
 }

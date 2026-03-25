@@ -1,4 +1,4 @@
-import { accounts, contacts, transactions, cards, cardTransactions } from './mockData.js'
+import { accounts, contacts, transactions, cards, cardTransactions, savingsProducts, SAVINGS_TARGETS } from './mockData.js'
 
 // ──────────────────────────────────────────────
 // 닉네임 → 실제 계좌 매핑 스토어 (메모리 내 영속)
@@ -226,6 +226,44 @@ export const toolDefinitions = [
     input_schema: {
       type: 'object',
       properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'get_savings_advice',
+    description: '이번 달 지출 패턴을 분석해 절약 가능한 항목과 금액을 제안합니다. "얼마 절약할 수 있어?", "지출 줄이는 법", "절약 방법", "절약 조언" 등의 요청에 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['this_month', 'last_month'],
+          description: '분석 기간. 기본값 this_month.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'compare_products',
+    description: '사용자 절약 목표에 맞는 금융상품(적금/예금)을 비교 추천합니다. "적금 추천", "어떤 적금이 좋아?", "금리 비교", "상품 추천" 등의 요청에 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        amount: {
+          type: 'number',
+          description: '월 납입 목표 금액(원). 미입력 시 50000원 기본값.',
+        },
+        period_months: {
+          type: 'number',
+          description: '가입 기간(개월). 기본값 6.',
+        },
+        product_type: {
+          type: 'string',
+          enum: ['savings', 'deposit'],
+          description: '상품 유형. savings: 적금, deposit: 예금. 기본값 savings.',
+        },
+      },
       required: [],
     },
   },
@@ -679,6 +717,94 @@ function handleGetMonthlyStory() {
 }
 
 // ──────────────────────────────────────────────
+// 절약 조언
+// ──────────────────────────────────────────────
+function handleGetSavingsAdvice({ period = 'this_month' } = {}) {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = period === 'last_month'
+    ? (now.getMonth() === 0 ? 12 : now.getMonth())
+    : now.getMonth() + 1
+  const targetYear = period === 'last_month' && now.getMonth() === 0
+    ? year - 1
+    : year
+
+  const monthTxs = cardTransactions.filter((t) => {
+    const d = new Date(t.date)
+    return d.getFullYear() === targetYear && d.getMonth() + 1 === month && t.amount < 0
+  })
+
+  // 카테고리별 집계
+  const catMap = new Map()
+  monthTxs.forEach((t) => {
+    catMap.set(t.category, (catMap.get(t.category) || 0) + Math.abs(t.amount))
+  })
+
+  const savings = []
+  let totalSaveable = 0
+
+  for (const [cat, spent] of catMap.entries()) {
+    const target = SAVINGS_TARGETS[cat]
+    if (!target) continue
+    const saveable = Math.round(spent * (1 - target.ratio))
+    if (saveable <= 0) continue
+    savings.push({
+      category: cat,
+      spent,
+      spentFormatted: spent.toLocaleString('ko-KR') + '원',
+      saveable,
+      saveableFormatted: saveable.toLocaleString('ko-KR') + '원',
+      reason: target.reason,
+      ratio: Math.round((1 - target.ratio) * 100),
+    })
+    totalSaveable += saveable
+  }
+
+  savings.sort((a, b) => b.saveable - a.saveable)
+
+  return {
+    period: `${targetYear}년 ${month}월`,
+    savings,
+    total_saveable: totalSaveable,
+    total_saveable_formatted: totalSaveable.toLocaleString('ko-KR') + '원',
+  }
+}
+
+// ──────────────────────────────────────────────
+// 상품 비교
+// ──────────────────────────────────────────────
+function handleCompareProducts({ amount = 50000, period_months = 6, product_type = 'savings' } = {}) {
+  const products = savingsProducts.map((p) => {
+    const maturity = Math.round(amount * period_months * (1 + (p.rate / 100) * (period_months / 12)))
+    const interest = maturity - amount * period_months
+    return {
+      ...p,
+      monthly_amount: amount,
+      monthly_amount_formatted: amount.toLocaleString('ko-KR') + '원',
+      period_months,
+      maturity,
+      maturity_formatted: maturity.toLocaleString('ko-KR') + '원',
+      interest,
+      interest_formatted: interest.toLocaleString('ko-KR') + '원',
+      rate_formatted: p.rate.toFixed(1) + '%',
+    }
+  })
+
+  const recommended = products.find((p) => p.recommended) || products[0]
+  const others = products.filter((p) => !p.recommended)
+
+  return {
+    amount,
+    amount_formatted: amount.toLocaleString('ko-KR') + '원',
+    period_months,
+    product_type,
+    recommended,
+    others,
+    products,
+  }
+}
+
+// ──────────────────────────────────────────────
 // Tool 디스패처
 // ──────────────────────────────────────────────
 export function handleToolCall(name, input) {
@@ -693,6 +819,8 @@ export function handleToolCall(name, input) {
     case 'analyze_spending':       return handleAnalyzeSpending(input)
     case 'complex_query':          return handleComplexQuery(input)
     case 'get_monthly_story':      return handleGetMonthlyStory()
+    case 'get_savings_advice':     return handleGetSavingsAdvice(input)
+    case 'compare_products':       return handleCompareProducts(input)
     default:
       return { error: `알 수 없는 tool: ${name}` }
   }

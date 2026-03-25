@@ -30,3 +30,35 @@
 **Effort:** S (human: ~10min / CC: N/A, 외부 서비스 설정)
 **Priority:** P1 (데모 전 필수)
 **Depends on:** Railway 배포 완료
+
+---
+
+## TODO-3: 음성 인식/TTS 실패 이벤트 로깅
+
+**What:** `useVoiceConfirm.js`와 `speakKorean()` 함수에 `console.error` 최소 로깅 추가.
+**Why:** 데모 시연 중 음성 인식이나 TTS가 조용히 실패해도 원인 파악 불가. DevTools 없이 현장 디버깅 불가능.
+**Pros:** 데모 안정성 향상, 이슈 발생 시 빠른 원인 파악.
+**Cons:** 거의 없음 — S급 추가 작업.
+**Context:**
+- `useVoiceConfirm`: `SpeechRecognitionError` 발생 시 error.error 코드 로깅
+- `speakKorean()`: try-catch 미적용 시 TTS 실패가 무음으로 넘어감
+- CEO 리뷰 2026-03-25 결정.
+**Effort:** S (human: ~15min / CC+gstack: ~5min)
+**Priority:** P2
+**Depends on:** Feature A 구현 완료
+
+---
+
+## TODO-4: Railway 워밍업 cron 재확인 (Feature A 완료 후)
+
+**What:** Feature A+B 배포 후 Railway 워밍업 cron이 새 엔드포인트와 함께 정상 동작하는지 확인. 기존 TODO-2의 후속.
+**Why:** Feature B의 `/api/chat` 새 툴 핸들러가 cold start 시 처음 호출에 초기화 지연이 생길 수 있음.
+**Pros:** 데모 당일 Feature B 첫 호출 지연 없음.
+**Cons:** 외부 cron 설정 변경 필요 없음 — 기존 `/api/proactive` ping으로 충분.
+**Context:**
+- 기존 TODO-2와 동일 cron 사용 가능 (경로 변경 없음)
+- Feature A+B 배포 완료 후 확인 체크만 필요
+- CEO 리뷰 2026-03-25 결정.
+**Effort:** S (human: ~5min)
+**Priority:** P2
+**Depends on:** Feature A+B 배포 완료
