@@ -691,7 +691,7 @@ export default function App() {
 
       {/* 입력 영역 */}
       <div className="input-area">
-        <div className="input-wrapper">
+        <div className={`input-wrapper${isRecording ? ' is-recording' : ''}`}>
           <textarea
             ref={textareaRef}
             className="input-text"

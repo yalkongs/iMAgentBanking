@@ -1,0 +1,27 @@
+# 환경 변수 (절대 커밋 금지)
+.env
+.env.local
+.env.*.local
+
+# 의존성
+node_modules/
+*/node_modules/
+
+# 빌드 결과물
+frontend/dist/
+backend/dist/
+
+# 로그
+*.log
+npm-debug.log*
+
+# 에디터
+.DS_Store
+.idea/
+.vscode/
+
+# Vercel
+.vercel/
+
+# gstack
+.gstack/

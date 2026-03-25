@@ -34,12 +34,12 @@ export default function SpendingCard({ data, onQuickAction }) {
       </div>
       <div className="spending-list">
         {items.slice(0, 6).map((item) => {
-          const key = data.groupBy === 'counterpart' ? item.counterpart : item.category
+          const key = item[data.groupBy] || item.category || item.counterpart || item.inferredCategory || '기타'
           const pct = Math.round((item.total / max) * 100)
           const color = CATEGORY_COLOR[key] || 'rgba(0,201,167,0.7)'
           const clickMsg = data.groupBy === 'counterpart'
             ? `${key} 거래 내역 보여줘`
-            : `이번 달 ${key} 지출 내역 보여줘`
+            : `이번 달 ${key} 지출 자세히 알려줘`
           return (
             <button
               key={key}

@@ -64,10 +64,12 @@ export default function TransactionList({ data, onQuickAction }) {
           <div key={grp.date} className="tx-group">
             <div className="tx-date-header">{grp.label}</div>
             {grp.items.map((tx) => {
-              const color = CATEGORY_COLOR[tx.category] || 'rgba(0,201,167,0.5)'
+              const displayCategory = tx.category || tx.inferredCategory || ''
+              const displayCounterpart = tx.counterpart || tx.merchant || ''
+              const color = CATEGORY_COLOR[displayCategory] || 'rgba(0,201,167,0.5)'
               const clickMsg = tx.amount < 0
-                ? `${tx.counterpart} 지출 내역 자세히 알려줘`
-                : `${tx.counterpart} 입금 내역 설명해줘`
+                ? `${displayCounterpart} 지출 내역 자세히 알려줘`
+                : `${displayCounterpart} 입금 내역 설명해줘`
               return (
                 <button
                   key={tx.id}
@@ -76,8 +78,8 @@ export default function TransactionList({ data, onQuickAction }) {
                 >
                   <div className="tx-accent-bar" style={{ background: color }} />
                   <div className="tx-info">
-                    <span className="tx-counterpart">{tx.counterpart}</span>
-                    <span className="tx-meta">{tx.category}</span>
+                    <span className="tx-counterpart">{displayCounterpart}</span>
+                    <span className="tx-meta">{displayCategory}</span>
                   </div>
                   <span className={`tx-amount ${tx.amount > 0 ? 'income' : 'expense'}`}>
                     {tx.amountFormatted}

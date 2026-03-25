@@ -841,36 +841,76 @@ input:focus-visible, textarea:focus-visible {
   flex-shrink: 0;
 }
 
+/* ── 마이크 버튼: Siri-style glow ── */
 .btn-mic {
-  width: 40px;
-  height: 40px;
+  position: relative;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
+  background: linear-gradient(135deg, rgba(201,168,76,0.12) 0%, rgba(201,168,76,0.04) 100%);
+  color: var(--gold);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 17px;
-  transition: background 0.15s, color 0.15s;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(201,168,76,0.35);
+  box-shadow: 0 0 10px 0 rgba(201,168,76,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+  animation: mic-idle-breathe 4s ease-in-out infinite;
+  transition: transform 0.18s, box-shadow 0.18s, background 0.18s, border-color 0.18s;
+  overflow: visible;
+}
+
+@keyframes mic-idle-breathe {
+  0%, 100% { box-shadow: 0 0 8px 0px rgba(201,168,76,0.15), inset 0 1px 0 rgba(255,255,255,0.06); }
+  50%       { box-shadow: 0 0 20px 4px rgba(201,168,76,0.35), inset 0 1px 0 rgba(255,255,255,0.08); }
 }
 
 .btn-mic:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: var(--accent-border);
+  background: linear-gradient(135deg, rgba(201,168,76,0.22) 0%, rgba(201,168,76,0.08) 100%);
+  border-color: rgba(201,168,76,0.65);
+  box-shadow: 0 0 26px 6px rgba(201,168,76,0.45), inset 0 1px 0 rgba(255,255,255,0.1);
+  transform: scale(1.1);
+  animation: none;
 }
 
+.btn-mic:active {
+  transform: scale(0.95);
+}
+
+/* 녹음 중: 붉은 파동 링 */
 .btn-mic.recording {
-  background: var(--error-dim);
-  color: var(--error);
-  border-color: rgba(248, 113, 113, 0.4);
-  animation: pulse-mic 1.5s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(251,113,133,0.22) 0%, rgba(239,68,68,0.08) 100%);
+  border-color: rgba(251,113,133,0.55);
+  color: #fb7185;
+  animation: none;
+  box-shadow: 0 0 0 0 rgba(251,113,133,0.4);
 }
 
-@keyframes pulse-mic {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.3); }
-  50% { box-shadow: 0 0 0 6px rgba(248, 113, 113, 0); }
+/* 확장하는 링 레이어 1 */
+.btn-mic.recording::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(251,113,133,0.5);
+  animation: mic-ring 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+/* 확장하는 링 레이어 2 (딜레이) */
+.btn-mic.recording::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid rgba(251,113,133,0.25);
+  animation: mic-ring 1.6s ease-out infinite 0.55s;
+  pointer-events: none;
+}
+
+@keyframes mic-ring {
+  0%   { transform: scale(0.95); opacity: 0.9; }
+  100% { transform: scale(1.7);  opacity: 0; }
 }
 
 /* 파형 바 애니메이션 */
@@ -887,6 +927,13 @@ input:focus-visible, textarea:focus-visible {
 @keyframes wave-bar {
   0%, 100% { transform: scaleY(0.35); }
   50%       { transform: scaleY(1); }
+}
+
+/* 녹음 중 input-wrapper 글로우 */
+.input-wrapper.is-recording {
+  border-color: rgba(251,113,133,0.4);
+  box-shadow: 0 0 0 3px rgba(251,113,133,0.08), 0 0 20px rgba(251,113,133,0.12);
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .btn-send {
