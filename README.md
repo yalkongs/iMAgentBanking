@@ -146,7 +146,6 @@ curl "https://api.vercel.com/v1/blob?prefix=archive/2026-03-25/" \
 
 ## 보안 주의사항
 
-- `backend/.env` 파일은 절대 git에 커밋하지 마세요 (`.gitignore`로 보호됨)
 - Railway와 Vercel의 환경변수 설정 화면에서 API 키를 입력하세요
 - Vercel Blob 아카이브는 `access: 'private'`으로 설정되어 공개 접근 불가
 
