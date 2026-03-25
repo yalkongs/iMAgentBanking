@@ -18,6 +18,7 @@ export const accounts = [
     bank: 'iM뱅크',
     accountNo: '503-34-5678901',
     monthlyDeposit: 300000,
+    openDate: '2025-04-01',
     maturityDate: '2026-12-31',
     interestRate: 4.2,
   },
@@ -28,6 +29,7 @@ export const accounts = [
     type: 'term_deposit',
     bank: 'iM뱅크',
     accountNo: '503-56-7890123',
+    openDate: '2025-09-15',
     maturityDate: '2026-09-15',
     interestRate: 3.8,
   },
@@ -250,15 +252,26 @@ export let transactions = [
   { id: 't168', date: d(164), amount: -120000, category: '자동이체', counterpart: '현대캐피탈 스마트폰 할부', accountId: 'acc001', source: 'account' },
   { id: 't169', date: d(154), amount: -45000,  category: '자동이체', counterpart: '쿠팡 로켓와우',      accountId: 'acc001', source: 'account' },
 
-  // ── 정기적금 납입·이자 ──────────────────────────────
+  // ── 정기적금 납입·이자 (2025-04 ~ 2026-03, 12개월) ──
   { id: 't200', date: d(3),   amount: 1050,    category: '이자',    counterpart: 'iM 정기적금 이자',   accountId: 'acc002', source: 'account' },
   { id: 't201', date: d(33),  amount: 1050,    category: '이자',    counterpart: 'iM 정기적금 이자',   accountId: 'acc002', source: 'account' },
   { id: 't202', date: d(64),  amount: 1050,    category: '이자',    counterpart: 'iM 정기적금 이자',   accountId: 'acc002', source: 'account' },
-  { id: 't203', date: d(5),   amount: 300000,  category: '이체',    counterpart: '주계좌 납입',        accountId: 'acc002', source: 'account' },
-  { id: 't204', date: d(33),  amount: 300000,  category: '이체',    counterpart: '주계좌 납입',        accountId: 'acc002', source: 'account' },
-  { id: 't205', date: d(64),  amount: 300000,  category: '이체',    counterpart: '주계좌 납입',        accountId: 'acc002', source: 'account' },
-  { id: 't206', date: d(94),  amount: 300000,  category: '이체',    counterpart: '주계좌 납입',        accountId: 'acc002', source: 'account' },
-  { id: 't207', date: d(124), amount: 300000,  category: '이체',    counterpart: '주계좌 납입',        accountId: 'acc002', source: 'account' },
+  { id: 't203', date: d(5),   amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't204', date: d(33),  amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't205', date: d(64),  amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't206', date: d(94),  amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't207', date: d(124), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't208', date: d(155), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't209', date: d(184), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't215', date: d(215), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't216', date: d(246), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't217', date: d(276), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't218', date: d(307), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't219', date: d(337), amount: 300000,  category: '납입',    counterpart: '주계좌 자동이체',    accountId: 'acc002', source: 'account' },
+  { id: 't230', date: d(337), amount: 300000,  category: '개설입금', counterpart: '적금 개설 첫 납입', accountId: 'acc002', source: 'account' },
+
+  // ── 정기예금 개설 (2025-09-15) ────────────────────
+  { id: 't240', date: d(191), amount: 10000000, category: '예금개설', counterpart: 'iM 정기예금 개설 입금', accountId: 'acc003', source: 'account' },
 
   // ── 비상금통장 이자 ────────────────────────────
   { id: 't210', date: d(3),   amount: 5000,    category: '이자',    counterpart: 'iM뱅크 이자',        accountId: 'acc004', source: 'account' },

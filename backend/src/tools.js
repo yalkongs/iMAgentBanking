@@ -310,7 +310,9 @@ function handleGetTransactions({
   account_id = 'acc001', start_date, end_date,
   category, counterpart, limit = 20, sort_by = 'date_desc',
 }, ctx) {
-  const { transactions } = ctx
+  const { accounts, transactions } = ctx
+  const account = accounts.find((a) => a.id === account_id)
+
   let txs = transactions.filter((t) => t.accountId === account_id)
   if (start_date)  txs = txs.filter((t) => t.date >= start_date)
   if (end_date)    txs = txs.filter((t) => t.date <= end_date)
@@ -325,13 +327,40 @@ function handleGetTransactions({
   }
   txs = txs.sort(sortFns[sort_by] || sortFns.date_desc).slice(0, limit)
 
-  return {
+  const result = {
     count: txs.length,
     transactions: txs.map((t) => ({
       ...t,
       amountFormatted: (t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR') + '원',
     })),
   }
+
+  // 정기예금·정기적금은 거래가 아닌 상품 주기 정보도 함께 제공
+  if (account && (account.type === 'term_deposit' || account.type === 'installment_savings')) {
+    const today = new Date().toISOString().slice(0, 10)
+    const maturityDate = account.maturityDate ?? null
+    const daysLeft = maturityDate
+      ? Math.ceil((new Date(maturityDate) - new Date(today)) / 86400000)
+      : null
+
+    result.productInfo = {
+      productType: account.type === 'term_deposit' ? '정기예금' : '정기적금',
+      openDate: account.openDate ?? null,
+      maturityDate,
+      interestRate: account.interestRate ?? null,
+      balance: account.balance,
+      balanceFormatted: account.balance.toLocaleString('ko-KR') + '원',
+      daysToMaturity: daysLeft,
+      ...(account.type === 'installment_savings' && {
+        monthlyDeposit: account.monthlyDeposit,
+        monthlyDepositFormatted: (account.monthlyDeposit ?? 0).toLocaleString('ko-KR') + '원',
+        totalPaid: txs.filter((t) => t.category === '납입' || t.category === '개설입금')
+                      .reduce((s, t) => s + t.amount, 0),
+      }),
+    }
+  }
+
+  return result
 }
 
 function maskAccountNo(accountNo) {

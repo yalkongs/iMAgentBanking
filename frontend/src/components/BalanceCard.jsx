@@ -15,17 +15,18 @@ function maskAccountNo(no) {
   return `···· ${last4}`
 }
 
-function AccountDetailView({ accountId, onBack, onQuickAction }) {
+function AccountDetailView({ accountId, sessionId, onBack, onQuickAction }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/account/${accountId}`)
+    const url = `${API_BASE}/api/account/${accountId}${sessionId ? `?sessionId=${sessionId}` : ''}`
+    fetch(url)
       .then((r) => r.json())
       .then(setDetail)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [accountId])
+  }, [accountId, sessionId])
 
   if (loading) {
     return (
@@ -105,7 +106,7 @@ function AccountDetailView({ accountId, onBack, onQuickAction }) {
   )
 }
 
-export default function BalanceCard({ data, onQuickAction, onClearScope, guiScope: cardGuiScope, initialAccountId }) {
+export default function BalanceCard({ data, sessionId, onQuickAction, onClearScope, guiScope: cardGuiScope, initialAccountId }) {
   const accounts = data.accounts || []
   const [selectedId, setSelectedId] = useState(initialAccountId || null)
   // 이 카드에서 드릴-다운 시 생성되는 메시지의 scope ID
@@ -133,6 +134,7 @@ export default function BalanceCard({ data, onQuickAction, onClearScope, guiScop
       <div className="ui-card balance-card">
         <AccountDetailView
           accountId={selectedId}
+          sessionId={sessionId}
           onBack={drillOut}
           onQuickAction={(text) => onQuickAction?.(text, detailScopeRef.current)}
         />

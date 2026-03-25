@@ -315,10 +315,23 @@ app.post('/api/reset-mock', (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// POST /api/clear-gui-scope — GUI 드릴-다운 메시지 쌍 제거
+// ──────────────────────────────────────────────
+app.post('/api/clear-gui-scope', (req, res) => {
+  const { sessionId = 'default', guiScope } = req.body
+  if (!guiScope) return res.json({ removed: 0 })
+  const session = sessions.get(sessionId)
+  if (!session) return res.json({ removed: 0 })
+  const before = session.messages.length
+  session.messages = session.messages.filter((m) => m._guiScope !== guiScope)
+  res.json({ removed: before - session.messages.length })
+})
+
+// ──────────────────────────────────────────────
 // POST /api/chat — Claude Tool Use + SSE 스트리밍
 // ──────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId = 'default' } = req.body
+  const { message, sessionId = 'default', guiScope = null } = req.body
   if (!message) return res.status(400).json({ error: 'message가 없습니다.' })
 
   // SSE 헤더
@@ -329,7 +342,8 @@ app.post('/api/chat', async (req, res) => {
   const sendSSE = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
 
   const session = getSession(sessionId)
-  session.messages.push({ role: 'user', content: message })
+  // _guiScope: GUI 드릴-다운 범위 태그 (Claude에는 전달 안 함, clear-gui-scope로 제거 가능)
+  session.messages.push({ role: 'user', content: message, _guiScope: guiScope })
 
   // ── 계좌/잔액 키워드 감지 → 첫 번째 턴에서 get_balance 강제 호출 ──
   const BALANCE_KEYWORDS = ['계좌', '잔액', '얼마', '내 돈', '보유 계좌', '내 계좌']
@@ -354,14 +368,14 @@ app.post('/api/chat', async (req, res) => {
         : { type: 'auto' }
       isFirstTurn = false
 
-      // Claude 스트리밍 요청
+      // Claude 스트리밍 요청 (_guiScope는 내부 태그이므로 제거 후 전달)
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         system: SYSTEM_PROMPT,
         tools: toolDefinitions,
         tool_choice: toolChoice,
-        messages: session.messages,
+        messages: session.messages.map(({ _guiScope, ...m }) => m),
       })
 
       for await (const event of stream) {
@@ -400,8 +414,8 @@ app.post('/api/chat', async (req, res) => {
       // 아카이빙용 텍스트 누적
       archiveAssistantText += fullText
 
-      // assistant 메시지 기록
-      session.messages.push({ role: 'assistant', content: finalMsg.content })
+      // assistant 메시지 기록 (guiScope 태깅)
+      session.messages.push({ role: 'assistant', content: finalMsg.content, _guiScope: guiScope })
 
       // stop_reason 확인
       if (finalMsg.stop_reason === 'tool_use') {
@@ -496,8 +510,8 @@ app.post('/api/chat', async (req, res) => {
           }
         }
 
-        // tool_results 를 messages 에 추가
-        session.messages.push({ role: 'user', content: toolResults })
+        // tool_results 를 messages 에 추가 (guiScope 태깅)
+        session.messages.push({ role: 'user', content: toolResults, _guiScope: guiScope })
       } else {
         // end_turn — 루프 종료
         continueLoop = false
@@ -565,10 +579,14 @@ app.post('/api/confirm-transfer', async (req, res) => {
 // GET /api/account/:id — 계좌 상세 (잔액 + 최근 거래)
 // ──────────────────────────────────────────────
 app.get('/api/account/:id', (req, res) => {
-  const acc = accounts.find((a) => a.id === req.params.id)
+  const sessionId = req.query.sessionId || 'default'
+  const session = getSession(sessionId)
+  const ctx = getSessionCtx(session)
+
+  const acc = ctx.accounts.find((a) => a.id === req.params.id)
   if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
 
-  const recentTransactions = transactions
+  const recentTransactions = ctx.transactions
     .filter((t) => t.accountId === acc.id)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)

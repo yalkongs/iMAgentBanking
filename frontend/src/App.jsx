@@ -320,11 +320,16 @@ export default function App() {
     }
   }, []))
 
-  // GUI 드릴-다운 scope 메시지 일괄 제거
+  // GUI 드릴-다운 scope 메시지 일괄 제거 (UI + 서버 AI 히스토리 동시 정리)
   const removeGuiScope = useCallback((scopeId) => {
     if (!scopeId) return
     setMessages((prev) => prev.filter((m) => m.guiScope !== scopeId))
-  }, [])
+    fetch(`${API_BASE}/api/clear-gui-scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, guiScope: scopeId }),
+    }).catch(() => {})
+  }, [sessionId])
 
   // 메시지 전송
   const sendMessage = useCallback(async (text, guiScope = null) => {
@@ -356,7 +361,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, sessionId }),
+        body: JSON.stringify({ message: msg, sessionId, guiScope }),
       })
 
       const reader = res.body.getReader()
