@@ -205,3 +205,9 @@ iMAgentBanking/
     │       └── useVoiceInput.js           # 음성 입력 (Whisper)
     └── vercel.json
 ```
+
+---
+
+## 개발자
+
+**황원철** — [@yalkongs](https://x.com/yalkongs)
