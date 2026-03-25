@@ -371,8 +371,7 @@ input:focus-visible, textarea:focus-visible {
   background: rgba(22, 25, 45, 0.70);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-left: 2px solid rgba(0, 201, 167, 0.40);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px 14px 14px 14px;
   color: var(--text-primary);
   box-shadow:
@@ -715,8 +714,7 @@ input:focus-visible, textarea:focus-visible {
   background: rgba(22, 25, 45, 0.70);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-left: 2px solid rgba(0, 201, 167, 0.40);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px 14px 14px 14px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.30);
 }
@@ -1970,22 +1968,22 @@ input:focus-visible, textarea:focus-visible {
   -webkit-backdrop-filter: blur(14px);
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-left-width: 3px;
+  border-top-width: 2px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   animation: slide-in 0.3s ease;
 }
 
 .tx-alert-card.income {
-  border-color: rgba(52, 211, 153, 0.30);
-  border-left-color: rgba(52, 211, 153, 0.85);
+  border-color: rgba(52, 211, 153, 0.25);
+  border-top-color: rgba(52, 211, 153, 0.85);
   background: rgba(11, 13, 30, 0.90);
   box-shadow: 0 4px 24px rgba(52, 211, 153, 0.12), 0 2px 8px rgba(0, 0, 0, 0.35);
   animation: alert-slide-income 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .tx-alert-card.expense {
-  border-color: rgba(248, 113, 113, 0.30);
-  border-left-color: rgba(248, 113, 113, 0.85);
+  border-color: rgba(248, 113, 113, 0.25);
+  border-top-color: rgba(248, 113, 113, 0.85);
   background: rgba(11, 13, 30, 0.90);
   box-shadow: 0 4px 24px rgba(248, 113, 113, 0.12), 0 2px 8px rgba(0, 0, 0, 0.35);
   animation: alert-slide-expense 0.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -2440,7 +2438,6 @@ input:focus-visible, textarea:focus-visible {
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--m-border, rgba(52, 211, 153, 0.22));
-  border-left: 3px solid var(--m-accent, #34D399);
   border-radius: var(--radius-lg);
   padding: 16px;
   margin-left: 40px;
