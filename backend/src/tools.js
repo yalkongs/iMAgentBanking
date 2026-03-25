@@ -12,7 +12,7 @@ export const aliasStore = new Map()
 export const toolDefinitions = [
   {
     name: 'get_balance',
-    description: '계좌 잔액을 조회합니다. 특정 계좌 또는 전체 계좌 잔액을 반환합니다.',
+    description: '계좌 잔액을 조회하거나 보유 계좌 목록을 보여줍니다. "계좌 목록", "내 계좌", "잔액 확인", "얼마 있어?" 등 모든 계좌/잔액 관련 요청에 사용합니다. 특정 계좌 또는 전체 계좌를 반환합니다.',
     input_schema: {
       type: 'object',
       properties: {
@@ -220,30 +220,40 @@ export const toolDefinitions = [
       required: ['query_type'],
     },
   },
+  {
+    name: 'get_monthly_story',
+    description: '이번 달 금융 이야기를 요약합니다. "이번 달 어땠어?", "월간 정리", "이달 이야기" 등의 요청에 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 ]
 
 // ──────────────────────────────────────────────
 // Tool 핸들러
 // ──────────────────────────────────────────────
 
+function serializeAccount(acc) {
+  return {
+    id: acc.id, name: acc.name, bank: acc.bank, type: acc.type,
+    accountNo: acc.accountNo, balance: acc.balance,
+    balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
+    interestRate: acc.interestRate ?? null,
+    maturityDate: acc.maturityDate ?? null,
+    monthlyDeposit: acc.monthlyDeposit ?? null,
+  }
+}
+
 function handleGetBalance({ account_id }) {
   if (account_id) {
     const acc = accounts.find((a) => a.id === account_id)
     if (!acc) return { error: `계좌 ${account_id}를 찾을 수 없습니다.` }
-    return {
-      accounts: [{
-        id: acc.id, name: acc.name, bank: acc.bank,
-        accountNo: acc.accountNo, balance: acc.balance,
-        balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
-      }],
-    }
+    return { accounts: [serializeAccount(acc)] }
   }
   return {
-    accounts: accounts.map((acc) => ({
-      id: acc.id, name: acc.name, bank: acc.bank,
-      accountNo: acc.accountNo, balance: acc.balance,
-      balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
-    })),
+    accounts: accounts.map(serializeAccount),
     totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
     totalBalanceFormatted: accounts.reduce((s, a) => s + a.balance, 0).toLocaleString('ko-KR') + '원',
   }
@@ -610,6 +620,65 @@ export function executeTransfer({ to_contact, amount, from_account_id = 'acc001'
 }
 
 // ──────────────────────────────────────────────
+// 월간 이야기 (Financial Story)
+// ──────────────────────────────────────────────
+function handleGetMonthlyStory() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+
+  // 이번 달 거래 집계
+  const monthTxs = transactions.filter((t) => {
+    const d = new Date(t.date)
+    return d.getFullYear() === year && d.getMonth() + 1 === month
+  })
+
+  const income = monthTxs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+  const expense = Math.abs(monthTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+  const savings = income - expense
+  const savingsRate = income > 0 ? Math.round((savings / income) * 100) : 0
+
+  // 카테고리별 집계 (지출)
+  const catMap = new Map()
+  monthTxs.filter((t) => t.amount < 0).forEach((t) => {
+    catMap.set(t.category, (catMap.get(t.category) || 0) + Math.abs(t.amount))
+  })
+  const topCats = [...catMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([cat, amt]) => `${cat} ${amt.toLocaleString('ko-KR')}원`)
+
+  // 등급 산정
+  let grade, gradeColor
+  if (savingsRate >= 30) { grade = 'A'; gradeColor = '#34D399' }
+  else if (savingsRate >= 20) { grade = 'B'; gradeColor = '#7dd3fc' }
+  else if (savingsRate >= 10) { grade = 'C'; gradeColor = '#FBBF24' }
+  else { grade = 'D'; gradeColor = '#F87171' }
+
+  const narrative = savings >= 0
+    ? `${month}월은 수입 대비 ${savingsRate}%를 저축한 달입니다. ${topCats[0] ? topCats[0] + ' 지출이 가장 많았으며, ' : ''}전반적으로 ${savingsRate >= 20 ? '안정적인' : '개선이 필요한'} 재무 흐름을 보였습니다.`
+    : `${month}월은 지출이 수입을 초과한 달입니다. ${topCats[0] ? topCats[0] + ' 지출이 가장 컸으며, ' : ''}다음 달 지출 계획을 재검토해 보시기 바랍니다.`
+
+  const highlights = []
+  if (topCats.length > 0) highlights.push(`최대 지출: ${topCats[0]}`)
+  if (topCats.length > 1) highlights.push(`2위: ${topCats[1]}`)
+  const salaryTx = monthTxs.find((t) => t.category === '급여')
+  if (salaryTx) highlights.push(`급여 입금: ${salaryTx.amount.toLocaleString('ko-KR')}원`)
+
+  return {
+    month: `${year}년 ${month}월`,
+    narrative,
+    incomeFormatted: income.toLocaleString('ko-KR') + '원',
+    expenseFormatted: expense.toLocaleString('ko-KR') + '원',
+    savingsFormatted: Math.abs(savings).toLocaleString('ko-KR') + '원',
+    savingsRate,
+    highlights,
+    grade,
+    gradeColor,
+  }
+}
+
+// ──────────────────────────────────────────────
 // Tool 디스패처
 // ──────────────────────────────────────────────
 export function handleToolCall(name, input) {
@@ -623,6 +692,7 @@ export function handleToolCall(name, input) {
     case 'analyze_card_spending':  return handleAnalyzeCardSpending(input)
     case 'analyze_spending':       return handleAnalyzeSpending(input)
     case 'complex_query':          return handleComplexQuery(input)
+    case 'get_monthly_story':      return handleGetMonthlyStory()
     default:
       return { error: `알 수 없는 tool: ${name}` }
   }

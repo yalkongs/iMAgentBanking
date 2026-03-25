@@ -8,6 +8,8 @@ import ContactCandidatesCard from './ContactCandidatesCard.jsx'
 import TransferSuggestionCard from './TransferSuggestionCard.jsx'
 import TransferReceiptCard from './TransferReceiptCard.jsx'
 import TransactionAlertCard from './TransactionAlertCard.jsx'
+import FinancialMomentCard from './FinancialMomentCard.jsx'
+import FinancialStoryCard from './FinancialStoryCard.jsx'
 
 export default function Message({ msg, sessionId, onTransferDone, onQuickAction }) {
   // 이체 확인 카드
@@ -41,15 +43,21 @@ export default function Message({ msg, sessionId, onTransferDone, onQuickAction 
     )
   }
 
+  // 금융 모먼트 카드 (급여, 카드대금 등)
+  if (msg.type === 'financial_moment') {
+    return <FinancialMomentCard data={msg.data} onQuickAction={onQuickAction} />
+  }
+
   // UI 카드 (잔액, 거래, 분석 등)
   if (msg.type === 'ui_card') {
     const { cardType, data } = msg
     if (cardType === 'get_balance') return <BalanceCard data={data} onQuickAction={onQuickAction} />
     if (cardType === 'get_transactions') return <TransactionList data={data} onQuickAction={onQuickAction} />
-    if (cardType === 'analyze_spending') return <SpendingCard data={data} />
-    if (cardType === 'analyze_card_spending') return <SpendingCard data={data} />
+    if (cardType === 'analyze_spending') return <SpendingCard data={data} onQuickAction={onQuickAction} />
+    if (cardType === 'analyze_card_spending') return <SpendingCard data={data} onQuickAction={onQuickAction} />
     if (cardType === 'get_transfer_suggestion') return <TransferSuggestionCard data={data} onQuickAction={onQuickAction} />
     if (cardType === 'resolve_contact_candidates') return <ContactCandidatesCard data={data} onQuickAction={onQuickAction} />
+    if (cardType === 'monthly_story') return <FinancialStoryCard data={data} />
     if (cardType === 'complex_query' || cardType === 'get_recent_transfer') {
       return <InsightCard cardType={cardType} data={data} />
     }
@@ -66,10 +74,24 @@ export default function Message({ msg, sessionId, onTransferDone, onQuickAction 
       )}
       <div className="message-bubble">
         {msg.role === 'assistant' ? (
-          <>
-            <ReactMarkdown>{msg.text}</ReactMarkdown>
-            {msg.streaming && <span className="cursor" />}
-          </>
+          msg.streaming && !msg.text ? (
+            <div className="typing-dots inline">
+              <span /><span /><span />
+            </div>
+          ) : (
+            <>
+              <ReactMarkdown>{msg.text}</ReactMarkdown>
+              {msg.streaming && <span className="cursor" />}
+              {msg.isError && msg.failedMsg && (
+                <button
+                  className="msg-retry-btn"
+                  onClick={() => onQuickAction(msg.failedMsg)}
+                >
+                  다시 시도
+                </button>
+              )}
+            </>
+          )
         ) : (
           msg.text
         )}

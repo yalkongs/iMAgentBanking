@@ -6,6 +6,7 @@ import { createServer } from 'http'
 import { WebSocketServer } from 'ws'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
+import { put } from '@vercel/blob'
 import { toolDefinitions, handleToolCall, executeTransfer, aliasStore, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
 import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts, accounts, transactions } from './mockData.js'
 
@@ -76,7 +77,7 @@ setInterval(async () => {
         max_tokens: 150,
         messages: [{
           role: 'user',
-          content: `다음 금융 거래에 대해 친근하고 유용한 1-2문장 코멘트를 한국어로 작성하라: ${txDesc}`,
+          content: `다음 금융 거래에 대해 유용한 1-2문장 코멘트를 한국어 격식체(~입니다, ~하세요)로 작성하라. 이모지 절대 사용 금지: ${txDesc}`,
         }],
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500)),
@@ -88,7 +89,32 @@ setInterval(async () => {
   } catch {
     // timeout or error — 코멘트 없이 표시 (이미 알림은 전송됨)
   }
-}, 45000) // 45초마다
+}, 90000) // 90초마다 (1회/분 이하)
+
+// ── 금융 모먼트 시뮬레이터 (급여, 카드대금 D-3) ──
+const FINANCIAL_MOMENTS = [
+  {
+    momentType: 'salary',
+    title: '(주)ABC테크에서 급여가 입금되었습니다',
+    amountFormatted: '3,000,000원',
+    description: '3월 급여가 주계좌에 입금되었습니다.',
+  },
+  {
+    momentType: 'card_due',
+    title: '신한카드 결제일이 3일 남았습니다',
+    amountFormatted: '485,000원',
+    description: '3월 카드 이용금액 485,000원이 4월 15일에 자동 결제됩니다.',
+    daysLeft: 3,
+  },
+]
+
+let momentIndex = 0
+setInterval(() => {
+  if (wsClients.size === 0) return
+  const moment = FINANCIAL_MOMENTS[momentIndex % FINANCIAL_MOMENTS.length]
+  momentIndex++
+  broadcastWsEvent({ type: 'FINANCIAL_MOMENT', data: moment })
+}, 180000) // 3분마다
 
 // ──────────────────────────────────────────────
 // 세션 관리 (대화 히스토리 + 대기 중인 이체)
@@ -115,6 +141,29 @@ const upload = multer({ storage: multer.memoryStorage() })
 // ──────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// ──────────────────────────────────────────────
+// 대화 아카이빙 — Vercel Blob (백그라운드, 사용자 비노출)
+// ──────────────────────────────────────────────
+async function archiveConversation({ sessionId, userMessage, assistantText, toolCalls }) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0, 10)           // e.g. 2026-03-25
+  const entry = {
+    id: `${sessionId}-${now.getTime()}`,
+    sessionId,
+    timestamp: now.toISOString(),
+    userMessage,
+    assistantText,
+    toolCalls,
+  }
+  const path = `archive/${dateStr}/${sessionId}/${now.getTime()}.json`
+  await put(path, JSON.stringify(entry), {
+    access: 'private',
+    contentType: 'application/json',
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  })
+}
 
 // ──────────────────────────────────────────────
 // System Prompt
@@ -151,8 +200,9 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 
 ## 일반 규칙
 - 항상 한국어로 응답하세요.
-- 도구 결과(잔액, 거래 내역, 분석 데이터)는 UI 카드로 자동 표시됩니다. 텍스트로 반복하지 마세요.
-- 도구 호출 후 응답은 1~2문장 코멘트만 하세요.
+- 계좌/잔액 관련 요청("계좌 목록", "내 계좌", "보유 계좌", "잔액", "얼마야" 등)은 이전 대화에서 잔액을 이미 알고 있더라도 반드시 get_balance 를 새로 호출하세요.
+- 도구 결과는 UI 카드로 자동 표시됩니다. 도구 결과의 숫자·목록·내역을 절대 텍스트로 반복하지 마세요. 잔액·거래금액·계좌번호 등을 텍스트로 언급하지 마세요.
+- 도구 호출 후에는 "확인하였습니다", "조회하였습니다" 등 1문장 안내만 하세요. 결과 데이터는 말하지 마세요.
 - 조회 요청에 닉네임이 포함되면 resolve_contact 로 실명을 먼저 확인하세요.
 - 어투는 반드시 '~입니다', '~까?', '~드리겠습니다' 형식의 정중한 격식체를 사용하세요. '~요', '~해요', '~할게요' 같은 구어체는 절대 사용하지 마세요.
 - 이모지는 사용하지 마세요.
@@ -171,7 +221,9 @@ app.post('/api/whisper', upload.single('audio'), async (req, res) => {
   }
 
   try {
-    const file = new File([req.file.buffer], 'audio.webm', { type: req.file.mimetype })
+    const mime = req.file.mimetype || 'audio/webm'
+    const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm'
+    const file = new File([req.file.buffer], `audio.${ext}`, { type: mime })
     const result = await openai.audio.transcriptions.create({
       file,
       model: 'whisper-1',
@@ -213,10 +265,12 @@ app.get('/api/insights', async (req, res) => {
     })
 
     const text = result.content[0]?.text?.trim() || '[]'
-    // JSON array 파싱 (마크다운 코드블록 제거)
-    const cleaned = text.replace(/^```json\s*|\s*```$/g, '').trim()
+    // JSON array 추출 — 코드블록이나 부가 텍스트 포함 대응
     let insights = []
-    try { insights = JSON.parse(cleaned) } catch { insights = [] }
+    try {
+      const match = text.match(/\[[\s\S]*\]/)
+      if (match) insights = JSON.parse(match[0])
+    } catch { insights = [] }
     if (!Array.isArray(insights)) insights = []
 
     res.json({ insights })
@@ -260,13 +314,28 @@ app.post('/api/chat', async (req, res) => {
   const session = getSession(sessionId)
   session.messages.push({ role: 'user', content: message })
 
+  // ── 계좌/잔액 키워드 감지 → 첫 번째 턴에서 get_balance 강제 호출 ──
+  const BALANCE_KEYWORDS = ['계좌', '잔액', '얼마', '내 돈', '보유 계좌', '내 계좌']
+  const needsBalanceTool = BALANCE_KEYWORDS.some((k) => message.includes(k))
+
   try {
     let continueLoop = true
+    let isFirstTurn = true  // 첫 번째 Claude 턴 여부
+
+    // 아카이빙용 — 모든 루프 이터레이션에 걸쳐 누적
+    let archiveAssistantText = ''
+    const archiveToolCalls = []
 
     while (continueLoop) {
       let fullText = ''
       let toolUses = []
       let currentToolUse = null
+
+      // 계좌 키워드가 있는 첫 번째 턴: get_balance 강제 호출
+      const toolChoice = (needsBalanceTool && isFirstTurn)
+        ? { type: 'tool', name: 'get_balance' }
+        : { type: 'auto' }
+      isFirstTurn = false
 
       // Claude 스트리밍 요청
       const stream = anthropic.messages.stream({
@@ -274,6 +343,7 @@ app.post('/api/chat', async (req, res) => {
         max_tokens: 2048,
         system: SYSTEM_PROMPT,
         tools: toolDefinitions,
+        tool_choice: toolChoice,
         messages: session.messages,
       })
 
@@ -310,6 +380,9 @@ app.post('/api/chat', async (req, res) => {
 
       const finalMsg = await stream.finalMessage()
 
+      // 아카이빙용 텍스트 누적
+      archiveAssistantText += fullText
+
       // assistant 메시지 기록
       session.messages.push({ role: 'assistant', content: finalMsg.content })
 
@@ -319,10 +392,11 @@ app.post('/api/chat', async (req, res) => {
         const toolResults = []
 
         for (const tu of toolUses) {
+          archiveToolCalls.push({ name: tu.name, input: tu.input })
           sendSSE({ type: 'tool_call', name: tu.name, input: tu.input })
 
           // ── UI 카드 생성 대상 tool ──
-          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion']
+          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story']
 
           // ── resolve_contact candidates → 선택 카드 ──
           if (tu.name === 'resolve_contact') {
@@ -413,6 +487,14 @@ app.post('/api/chat', async (req, res) => {
 
     sendSSE({ type: 'done' })
     res.end()
+
+    // 백그라운드 아카이빙 — 사용자 응답 후 비동기 처리
+    archiveConversation({
+      sessionId,
+      userMessage: message,
+      assistantText: archiveAssistantText,
+      toolCalls: archiveToolCalls,
+    }).catch(() => {})
   } catch (err) {
     console.error('Chat error:', err)
     sendSSE({ type: 'error', message: err.message })
@@ -460,12 +542,59 @@ app.post('/api/confirm-transfer', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// GET /api/account/:id — 계좌 상세 (잔액 + 최근 거래)
+// ──────────────────────────────────────────────
+app.get('/api/account/:id', (req, res) => {
+  const acc = accounts.find((a) => a.id === req.params.id)
+  if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
+
+  const recentTransactions = transactions
+    .filter((t) => t.accountId === acc.id)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5)
+    .map((t) => ({
+      ...t,
+      amountFormatted: (t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR') + '원',
+    }))
+
+  res.json({ account: acc, recentTransactions })
+})
+
+// ──────────────────────────────────────────────
 // POST /api/reset — 세션 초기화
 // ──────────────────────────────────────────────
 app.post('/api/reset', (req, res) => {
   const { sessionId = 'default' } = req.body
   sessions.delete(sessionId)
   res.json({ success: true })
+})
+
+// ──────────────────────────────────────────────
+// GET /api/health-score — 금융 건강도 점수
+// ──────────────────────────────────────────────
+app.get('/api/health-score', (req, res) => {
+  // 이번 달 거래 집계
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const monthTxs = transactions.filter((t) => {
+    const d = new Date(t.date)
+    return d.getFullYear() === year && d.getMonth() + 1 === month
+  })
+  const income = monthTxs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+  const expense = Math.abs(monthTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+  const savingsRate = income > 0 ? (income - expense) / income : 0
+
+  // 전체 자산 대비 부채 (단순화: 없으므로 0)
+  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0)
+
+  // 점수 계산 (0-100)
+  let score = 50
+  score += Math.min(30, Math.round(savingsRate * 60))     // 저축률 (최대 30점)
+  score += totalBalance >= 5000000 ? 20 : Math.round(totalBalance / 5000000 * 20) // 자산 (최대 20점)
+  score = Math.max(0, Math.min(100, score))
+
+  res.json({ score, savingsRate: Math.round(savingsRate * 100), income, expense })
 })
 
 // ──────────────────────────────────────────────

@@ -12,7 +12,7 @@ const CATEGORY_COLOR = {
   카드대금: '#fb923c',
 }
 
-export default function SpendingCard({ data }) {
+export default function SpendingCard({ data, onQuickAction }) {
   const items = data.items || []
   if (!items.length) return null
 
@@ -37,11 +37,19 @@ export default function SpendingCard({ data }) {
           const key = data.groupBy === 'counterpart' ? item.counterpart : item.category
           const pct = Math.round((item.total / max) * 100)
           const color = CATEGORY_COLOR[key] || 'rgba(0,201,167,0.7)'
+          const clickMsg = data.groupBy === 'counterpart'
+            ? `${key} 거래 내역 보여줘`
+            : `이번 달 ${key} 지출 내역 보여줘`
           return (
-            <div key={key} className="spending-item">
+            <button
+              key={key}
+              className="spending-item spending-item-btn"
+              onClick={() => onQuickAction && onQuickAction(clickMsg)}
+            >
               <div className="spending-item-row">
                 <div className="spending-dot" style={{ background: color }} />
                 <span className="spending-label">{key}</span>
+                <span className="spending-count">{item.count}건</span>
                 <span className="spending-amount">{item.totalFormatted}</span>
               </div>
               <div className="spending-bar-track">
@@ -50,7 +58,7 @@ export default function SpendingCard({ data }) {
                   style={{ width: pct + '%', background: color + 'a0' }}
                 />
               </div>
-            </div>
+            </button>
           )
         })}
       </div>

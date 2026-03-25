@@ -2,12 +2,23 @@ export default function TransactionAlertCard({ data, onQuickAction }) {
   const { counterpart, amountFormatted, isIncome, category, memo, timestamp, aiComment } = data
 
   return (
-    <div className={`tx-alert-card ${isIncome ? 'income' : 'expense'}`}>
-      <div className="tx-alert-dot" />
+    <div
+      className={`tx-alert-card ${isIncome ? 'income' : 'expense'}${onQuickAction ? ' clickable' : ''}`}
+      onClick={onQuickAction ? () => onQuickAction('잔액 얼마야?') : undefined}
+      title={onQuickAction ? '계좌 확인' : undefined}
+    >
+      <div className="tx-alert-icon">{isIncome ? '↓' : '↑'}</div>
       <div className="tx-alert-body">
         <div className="tx-alert-top">
-          <span className="tx-alert-counterpart">{counterpart}</span>
-          <span className="tx-alert-amount">{amountFormatted}</span>
+          <div className="tx-alert-left">
+            <span className={`tx-alert-badge ${isIncome ? 'income' : 'expense'}`}>
+              {isIncome ? '입금' : '출금'}
+            </span>
+            <span className="tx-alert-counterpart">{counterpart}</span>
+          </div>
+          <span className={`tx-alert-amount ${isIncome ? 'income' : 'expense'}`}>
+            {amountFormatted}
+          </span>
         </div>
         <div className="tx-alert-bottom">
           <span className="tx-alert-meta">{category}{memo ? ` · ${memo}` : ''}</span>
@@ -18,12 +29,7 @@ export default function TransactionAlertCard({ data, onQuickAction }) {
         )}
       </div>
       {onQuickAction && (
-        <button
-          className="tx-alert-action"
-          onClick={() => onQuickAction('잔액 얼마야?')}
-        >
-          잔액 확인
-        </button>
+        <span className="tx-alert-enter-hint">›</span>
       )}
     </div>
   )
