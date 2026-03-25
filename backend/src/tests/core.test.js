@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { accounts, transactions, getInitialAccounts, getInitialTransactions } from '../mockData.js'
-import { aliasStore, handleToolCall } from '../tools.js'
+import { getInitialAccounts, getInitialTransactions } from '../mockData.js'
+import { handleToolCall } from '../tools.js'
+
+// 테스트용 세션 ctx 팩토리
+function makeCtx() {
+  return {
+    accounts: getInitialAccounts(),
+    transactions: getInitialTransactions(),
+    aliasStore: new Map(),
+  }
+}
 
 // ── Test 1: alertId ──────────────────────────────────────────────────────────
-// TRANSACTION_ALERT와 TRANSACTION_ALERT_COMMENT가 동일 alertId를 공유해야 함.
-// server.js의 로직을 단순 추출하여 검증한다.
 describe('alertId', () => {
   it('alertId는 Date.now() 기반 문자열이어야 한다', () => {
     const alertId = Date.now().toString()
@@ -21,55 +28,36 @@ describe('alertId', () => {
   })
 })
 
-// ── Test 2: reset-mock ───────────────────────────────────────────────────────
+// ── Test 2: reset-mock (세션 격리) ───────────────────────────────────────────
 describe('reset-mock', () => {
-  beforeEach(() => {
-    // 데이터 변형: 잔액 감소, 트랜잭션 추가, alias 등록
-    accounts[0].balance -= 50000
-    transactions.push({
-      id: 't_test_' + Date.now(),
-      date: new Date().toISOString().slice(0, 10),
-      amount: -50000,
-      category: '송금',
-      counterpart: '테스트',
-      accountId: 'acc001',
-    })
-    aliasStore.set('엄마', { realName: '이순자', bank: '농협은행', accountNo: '301-1234-5678-01' })
+  it('새 ctx는 초기 잔액을 가져야 한다', () => {
+    const ctx = makeCtx()
+    const initialBalance = getInitialAccounts().find((a) => a.id === 'acc001').balance
+    expect(ctx.accounts.find((a) => a.id === 'acc001').balance).toBe(initialBalance)
   })
 
-  it('reset 후 accounts 잔액이 초기값으로 복원되어야 한다', () => {
-    const initialAccounts = getInitialAccounts()
-    const initialBalance = initialAccounts.find((a) => a.id === 'acc001').balance
+  it('ctx 변형이 다른 ctx에 영향을 주지 않아야 한다', () => {
+    const ctx1 = makeCtx()
+    const ctx2 = makeCtx()
+    ctx1.accounts[0].balance -= 50000
+    ctx1.aliasStore.set('엄마', { realName: '이순자', bank: '농협은행', accountNo: '301-1234-5678-01' })
 
-    // reset 수행
-    const freshAccounts = getInitialAccounts()
-    accounts.length = 0
-    accounts.push(...freshAccounts)
-
-    expect(accounts.find((a) => a.id === 'acc001').balance).toBe(initialBalance)
+    // ctx2는 영향 없음
+    const initialBalance = getInitialAccounts().find((a) => a.id === 'acc001').balance
+    expect(ctx2.accounts.find((a) => a.id === 'acc001').balance).toBe(initialBalance)
+    expect(ctx2.aliasStore.size).toBe(0)
   })
 
-  it('reset 후 transactions 수가 초기값으로 복원되어야 한다', () => {
-    const initialCount = getInitialTransactions().length
-
-    // reset 수행
-    const freshTransactions = getInitialTransactions()
-    transactions.length = 0
-    transactions.push(...freshTransactions)
-
-    expect(transactions.length).toBe(initialCount)
-  })
-
-  it('reset 후 aliasStore가 비어있어야 한다', () => {
-    aliasStore.clear()
-    expect(aliasStore.size).toBe(0)
+  it('새 ctx의 aliasStore는 비어있어야 한다', () => {
+    const ctx = makeCtx()
+    expect(ctx.aliasStore.size).toBe(0)
   })
 })
 
 // ── Test 3: handleSavingsAdvice ───────────────────────────────────────────────
 describe('handleSavingsAdvice', () => {
   it('기본 호출 시 savings 배열과 total_saveable를 반환해야 한다', () => {
-    const result = handleToolCall('get_savings_advice', {})
+    const result = handleToolCall('get_savings_advice', {}, makeCtx())
     expect(result).toHaveProperty('savings')
     expect(Array.isArray(result.savings)).toBe(true)
     expect(result).toHaveProperty('total_saveable')
@@ -77,7 +65,7 @@ describe('handleSavingsAdvice', () => {
   })
 
   it('savings 각 항목은 category, saveable, reason 필드를 가져야 한다', () => {
-    const result = handleToolCall('get_savings_advice', { period: 'this_month' })
+    const result = handleToolCall('get_savings_advice', { period: 'this_month' }, makeCtx())
     for (const item of result.savings) {
       expect(item).toHaveProperty('category')
       expect(item).toHaveProperty('saveable')
@@ -86,8 +74,7 @@ describe('handleSavingsAdvice', () => {
   })
 
   it('카테고리 지출이 없을 때 savings가 빈 배열이어야 한다', () => {
-    const result = handleToolCall('get_savings_advice', { period: 'last_month' })
-    // 빈 배열이거나 항목이 있거나 — 오류 없이 반환되어야 함
+    const result = handleToolCall('get_savings_advice', { period: 'last_month' }, makeCtx())
     expect(Array.isArray(result.savings)).toBe(true)
   })
 })
@@ -95,20 +82,20 @@ describe('handleSavingsAdvice', () => {
 // ── Test 4: handleCompareProducts ─────────────────────────────────────────────
 describe('handleCompareProducts', () => {
   it('기본 호출 시 recommended와 products 배열을 반환해야 한다', () => {
-    const result = handleToolCall('compare_products', {})
+    const result = handleToolCall('compare_products', {}, makeCtx())
     expect(result).toHaveProperty('recommended')
     expect(result).toHaveProperty('products')
     expect(Array.isArray(result.products)).toBe(true)
   })
 
   it('amount 미전달 시 50000원 기본값이 적용되어야 한다', () => {
-    const result = handleToolCall('compare_products', {})
+    const result = handleToolCall('compare_products', {}, makeCtx())
     expect(result.amount).toBe(50000)
     expect(result.amount_formatted).toBe('50,000원')
   })
 
   it('recommended 상품은 cta_url이 있으면 iM뱅크 상품이어야 한다', () => {
-    const result = handleToolCall('compare_products', { amount: 100000 })
+    const result = handleToolCall('compare_products', { amount: 100000 }, makeCtx())
     if (result.recommended?.cta_url) {
       expect(result.recommended.bank).toBe('iM뱅크')
     }

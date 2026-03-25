@@ -1,4 +1,4 @@
-import { accounts, contacts, transactions, cards, cardTransactions, savingsProducts, SAVINGS_TARGETS } from './mockData.js'
+import { contacts, cards, cardTransactions, savingsProducts, SAVINGS_TARGETS } from './mockData.js'
 
 // ──────────────────────────────────────────────
 // 로컬 날짜 문자열 헬퍼 (타임존 버그 방지)
@@ -12,11 +12,7 @@ function localDateStr(date) {
   return `${y}-${m}-${d}`
 }
 
-// ──────────────────────────────────────────────
-// 닉네임 → 실제 계좌 매핑 스토어 (메모리 내 영속)
-// { nickname → { realName, bank, accountNo } }
-// ──────────────────────────────────────────────
-export const aliasStore = new Map()
+// aliasStore는 세션별로 관리 — server.js의 getSession()에서 생성
 
 // ──────────────────────────────────────────────
 // Claude Tool 정의
@@ -296,7 +292,8 @@ function serializeAccount(acc) {
   }
 }
 
-function handleGetBalance({ account_id }) {
+function handleGetBalance({ account_id }, ctx) {
+  const { accounts } = ctx
   if (account_id) {
     const acc = accounts.find((a) => a.id === account_id)
     if (!acc) return { error: `계좌 ${account_id}를 찾을 수 없습니다.` }
@@ -312,7 +309,8 @@ function handleGetBalance({ account_id }) {
 function handleGetTransactions({
   account_id = 'acc001', start_date, end_date,
   category, counterpart, limit = 20, sort_by = 'date_desc',
-}) {
+}, ctx) {
+  const { transactions } = ctx
   let txs = transactions.filter((t) => t.accountId === account_id)
   if (start_date)  txs = txs.filter((t) => t.date >= start_date)
   if (end_date)    txs = txs.filter((t) => t.date <= end_date)
@@ -342,7 +340,8 @@ function maskAccountNo(accountNo) {
   return '****' + digits.slice(-4)
 }
 
-function handleResolveContact({ query }) {
+function handleResolveContact({ query }, ctx) {
+  const { transactions, aliasStore } = ctx
   const q = query.trim()
 
   // 1. aliasStore에 저장된 닉네임인지 확인
@@ -405,7 +404,8 @@ function handleResolveContact({ query }) {
   }
 }
 
-function handleSaveAlias({ nickname, account_no }) {
+function handleSaveAlias({ nickname, account_no }, ctx) {
+  const { aliasStore } = ctx
   const contact = contacts.find((c) => c.accountNo === account_no)
   if (!contact) {
     return { success: false, error: `계좌번호 ${account_no}를 찾을 수 없습니다.` }
@@ -423,7 +423,8 @@ function handleSaveAlias({ nickname, account_no }) {
   }
 }
 
-function handleGetTransferSuggestion({ real_name }) {
+function handleGetTransferSuggestion({ real_name }, ctx) {
+  const { transactions } = ctx
   const sentTxs = transactions
     .filter((t) =>
       t.accountId === 'acc001' &&
@@ -490,7 +491,7 @@ function handleGetCardTransactions({
   }
 }
 
-export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group_by = 'inferredCategory' }) {
+export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group_by = 'inferredCategory' }, ctx) {
   const now = new Date()
   const defaultStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const s = start_date || defaultStart
@@ -531,7 +532,8 @@ export function handleAnalyzeCardSpending({ start_date, end_date, card_id, group
   }
 }
 
-export function handleAnalyzeSpending({ start_date, end_date, group_by = 'category' }) {
+export function handleAnalyzeSpending({ start_date, end_date, group_by = 'category' }, ctx) {
+  const { transactions } = ctx
   const now = new Date()
   const defaultStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const s = start_date || defaultStart
@@ -562,7 +564,8 @@ export function handleAnalyzeSpending({ start_date, end_date, group_by = 'catego
   }
 }
 
-function handleComplexQuery({ query_type, category }) {
+function handleComplexQuery({ query_type, category }, ctx) {
+  const { transactions } = ctx
   const now = new Date()
   const thisMonthStart = localDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
   const lastMonthStart = localDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1))
@@ -622,7 +625,8 @@ function handleComplexQuery({ query_type, category }) {
 // ──────────────────────────────────────────────
 // 이체 실행 (server.js에서 확인 후 호출)
 // ──────────────────────────────────────────────
-export function executeTransfer({ to_contact, amount, from_account_id = 'acc001', memo = '' }) {
+export function executeTransfer({ to_contact, amount, from_account_id = 'acc001', memo = '' }, ctx) {
+  const { accounts, transactions, aliasStore } = ctx
   // 실명으로 contacts 검색
   let contact = contacts.find((c) => c.realName === to_contact)
 
@@ -672,7 +676,8 @@ export function executeTransfer({ to_contact, amount, from_account_id = 'acc001'
 // ──────────────────────────────────────────────
 // 월간 이야기 (Financial Story)
 // ──────────────────────────────────────────────
-function handleGetMonthlyStory() {
+function handleGetMonthlyStory(_, ctx) {
+  const { transactions } = ctx
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
@@ -819,20 +824,20 @@ function handleCompareProducts({ amount = 50000, period_months = 6, product_type
 // ──────────────────────────────────────────────
 // Tool 디스패처
 // ──────────────────────────────────────────────
-export function handleToolCall(name, input) {
+export function handleToolCall(name, input, ctx) {
   switch (name) {
-    case 'get_balance':            return handleGetBalance(input)
-    case 'get_transactions':       return handleGetTransactions(input)
-    case 'resolve_contact':        return handleResolveContact(input)
-    case 'save_alias':             return handleSaveAlias(input)
-    case 'get_transfer_suggestion': return handleGetTransferSuggestion(input)
-    case 'get_card_transactions':   return handleGetCardTransactions(input)
-    case 'analyze_card_spending':  return handleAnalyzeCardSpending(input)
-    case 'analyze_spending':       return handleAnalyzeSpending(input)
-    case 'complex_query':          return handleComplexQuery(input)
-    case 'get_monthly_story':      return handleGetMonthlyStory()
-    case 'get_savings_advice':     return handleGetSavingsAdvice(input)
-    case 'compare_products':       return handleCompareProducts(input)
+    case 'get_balance':            return handleGetBalance(input, ctx)
+    case 'get_transactions':       return handleGetTransactions(input, ctx)
+    case 'resolve_contact':        return handleResolveContact(input, ctx)
+    case 'save_alias':             return handleSaveAlias(input, ctx)
+    case 'get_transfer_suggestion': return handleGetTransferSuggestion(input, ctx)
+    case 'get_card_transactions':   return handleGetCardTransactions(input, ctx)
+    case 'analyze_card_spending':  return handleAnalyzeCardSpending(input, ctx)
+    case 'analyze_spending':       return handleAnalyzeSpending(input, ctx)
+    case 'complex_query':          return handleComplexQuery(input, ctx)
+    case 'get_monthly_story':      return handleGetMonthlyStory(input, ctx)
+    case 'get_savings_advice':     return handleGetSavingsAdvice(input, ctx)
+    case 'compare_products':       return handleCompareProducts(input, ctx)
     default:
       return { error: `알 수 없는 tool: ${name}` }
   }

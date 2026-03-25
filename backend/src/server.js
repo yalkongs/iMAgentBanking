@@ -7,8 +7,8 @@ import { WebSocketServer } from 'ws'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { put } from '@vercel/blob'
-import { toolDefinitions, handleToolCall, executeTransfer, aliasStore, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
-import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts, accounts, transactions } from './mockData.js'
+import { toolDefinitions, handleToolCall, executeTransfer, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
+import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts } from './mockData.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -119,13 +119,25 @@ setInterval(() => {
 // ──────────────────────────────────────────────
 // 세션 관리 (대화 히스토리 + 대기 중인 이체)
 // ──────────────────────────────────────────────
-const sessions = new Map() // sessionId → { messages: [], pendingTransfer: null }
+const sessions = new Map()
+// sessionId → { messages, pendingTransfer, accounts, transactions, aliasStore }
+// 새 세션마다 독립적인 데이터 스냅샷을 생성해 사용자 간 상태 격리
 
 function getSession(sessionId) {
   if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, { messages: [], pendingTransfer: null })
+    sessions.set(sessionId, {
+      messages: [],
+      pendingTransfer: null,
+      accounts: getInitialAccounts(),
+      transactions: getInitialTransactions(),
+      aliasStore: new Map(),
+    })
   }
   return sessions.get(sessionId)
+}
+
+function getSessionCtx(session) {
+  return { accounts: session.accounts, transactions: session.transactions, aliasStore: session.aliasStore }
 }
 
 // ──────────────────────────────────────────────
@@ -252,9 +264,12 @@ app.get('/api/proactive', (req, res) => {
 // ──────────────────────────────────────────────
 app.get('/api/insights', async (req, res) => {
   try {
+    const sessionId = req.query.sessionId || 'default'
+    const session = getSession(sessionId)
+    const ctx = getSessionCtx(session)
     const [accountData, cardData] = await Promise.all([
-      Promise.resolve(handleAnalyzeSpending({})),
-      Promise.resolve(handleAnalyzeCardSpending({})),
+      Promise.resolve(handleAnalyzeSpending({}, ctx)),
+      Promise.resolve(handleAnalyzeCardSpending({}, ctx)),
     ])
     const spendingSummary = JSON.stringify({ account: accountData, card: cardData })
 
@@ -284,19 +299,18 @@ app.get('/api/insights', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────
-// POST /api/reset-mock — mock 데이터 초기화
+// POST /api/reset-mock — 특정 세션 데이터 초기화
 // ──────────────────────────────────────────────
 app.post('/api/reset-mock', (req, res) => {
-  const freshAccounts = getInitialAccounts()
-  accounts.length = 0
-  accounts.push(...freshAccounts)
-
-  const freshTransactions = getInitialTransactions()
-  transactions.length = 0
-  transactions.push(...freshTransactions)
-
-  aliasStore.clear()
-
+  const { sessionId } = req.body
+  if (sessionId && sessions.has(sessionId)) {
+    const session = sessions.get(sessionId)
+    session.accounts = getInitialAccounts()
+    session.transactions = getInitialTransactions()
+    session.aliasStore = new Map()
+    session.messages = []
+    session.pendingTransfer = null
+  }
   res.json({ success: true })
 })
 
@@ -401,9 +415,11 @@ app.post('/api/chat', async (req, res) => {
           // ── UI 카드 생성 대상 tool ──
           const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story', 'get_savings_advice', 'compare_products']
 
+          const ctx = getSessionCtx(session)
+
           // ── resolve_contact candidates → 선택 카드 ──
           if (tu.name === 'resolve_contact') {
-            const result = handleToolCall('resolve_contact', tu.input)
+            const result = handleToolCall('resolve_contact', tu.input, ctx)
             toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) })
             if (result.status === 'candidates') {
               sendSSE({ type: 'ui_card', cardType: 'resolve_contact_candidates', data: result })
@@ -415,10 +431,10 @@ app.post('/api/chat', async (req, res) => {
           if (tu.name === 'transfer') {
             const { to_contact, amount, from_account_id = 'acc001', memo = '' } = tu.input
 
-            // 실명으로 contacts 검색, 없으면 aliasStore에서 실명으로 검색
+            // 실명으로 contacts(read-only) 검색, 없으면 세션 aliasStore에서 검색
             let contact = contacts.find((c) => c.realName === to_contact) || null
             if (!contact) {
-              for (const [, v] of aliasStore) {
+              for (const [, v] of ctx.aliasStore) {
                 if (v.realName === to_contact) { contact = v; break }
               }
             }
@@ -443,7 +459,7 @@ app.post('/api/chat', async (req, res) => {
                 from_account_id,
                 memo,
                 contactInfo: contact,
-                availableAccounts: accounts
+                availableAccounts: session.accounts
                   .filter((a) => a.type === '입출금' || a.type === 'CMA')
                   .map((a) => ({
                     id: a.id,
@@ -467,7 +483,7 @@ app.post('/api/chat', async (req, res) => {
             sendSSE({ type: 'transfer_pending', data: pendingData })
           } else {
             // 일반 tool 실행
-            const result = handleToolCall(tu.name, tu.input)
+            const result = handleToolCall(tu.name, tu.input, ctx)
             toolResults.push({
               type: 'tool_result',
               tool_use_id: tu.id,
@@ -525,12 +541,13 @@ app.post('/api/confirm-transfer', async (req, res) => {
   }
 
   // 실제 이체 실행 (프론트에서 선택한 계좌 우선)
+  const ctx = getSessionCtx(session)
   const result = executeTransfer({
     to_contact: pending.to_contact,
     amount: pending.amount,
     from_account_id: selectedAccountId || pending.from_account_id,
     memo: pending.memo,
-  })
+  }, ctx)
 
   if (result.success) {
     sendWsEvent(sessionId, {
