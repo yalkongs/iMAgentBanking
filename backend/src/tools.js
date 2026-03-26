@@ -1,4 +1,5 @@
 import { contacts, cards, cardTransactions, savingsProducts, SAVINGS_TARGETS } from './mockData.js'
+import { searchProducts, getProductById, CATEGORY_LABELS } from './products.js'
 
 // ──────────────────────────────────────────────
 // 로컬 날짜 문자열 헬퍼 (타임존 버그 방지)
@@ -250,6 +251,42 @@ export const toolDefinitions = [
         },
       },
       required: [],
+    },
+  },
+  {
+    name: 'search_products',
+    description: `iM뱅크 금융 상품을 검색하고 목록을 보여줍니다.
+- "카드 알려줘", "대출 상품", "적금 추천", "예금 상품", "IRP", "ISA" 등 상품 종류 문의에 사용합니다.
+- "해외 여행 카드", "마일리지 카드", "대중교통 할인" 등 특정 혜택 검색에도 사용합니다.
+- 상품 유형(type)과 검색어(keyword)를 조합해 원하는 상품을 찾을 수 있습니다.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['deposit', 'savings', 'loan', 'credit_card', 'debit_card', 'investment'],
+          description: '상품 유형. deposit: 예금, savings: 적금, loan: 대출, credit_card: 신용카드, debit_card: 체크카드, investment: IRP/ISA. 생략하면 전체 검색.',
+        },
+        keyword: {
+          type: 'string',
+          description: '검색 키워드. 상품명·혜택·특징 등. 예: 해외, 캐시백, 마일리지, 청년, 비대면',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_product_detail',
+    description: '특정 iM뱅크 금융 상품의 상세 정보를 조회합니다. search_products로 상품 ID를 먼저 확인한 후 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        product_id: {
+          type: 'string',
+          description: '조회할 상품 ID (예: cc_001, loan_002)',
+        },
+      },
+      required: ['product_id'],
     },
   },
   {
@@ -851,6 +888,59 @@ function handleCompareProducts({ amount = 50000, period_months = 6, product_type
 }
 
 // ──────────────────────────────────────────────
+// 상품 검색
+// ──────────────────────────────────────────────
+function handleSearchProducts({ type, keyword } = {}) {
+  const results = searchProducts({ type, keyword })
+
+  if (!results.length) {
+    return {
+      found: false,
+      message: '조건에 맞는 상품이 없습니다.',
+      products: [],
+    }
+  }
+
+  // 목록용 요약 데이터 반환
+  const summaries = results.map((p) => ({
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    typeLabel: p.typeLabel,
+    category: p.category,
+    summary: p.highlights?.[0] || '',
+    rateInfo: p.baseRate != null
+      ? (p.maxRate && p.maxRate !== p.baseRate
+          ? `연 ${p.baseRate}% ~ ${p.maxRate}%`
+          : `연 ${p.baseRate}%`)
+      : (p.minRate != null
+          ? `연 ${p.minRate}% ~ ${p.maxRate}%`
+          : null),
+    annualFee: p.annualFee != null ? p.annualFee : undefined,
+    tags: p.tags || [],
+    highlightCount: (p.highlights || []).length,
+  }))
+
+  const typeLabel = type ? CATEGORY_LABELS[type] : '전체'
+
+  return {
+    found: true,
+    query: { type, keyword },
+    typeLabel,
+    count: summaries.length,
+    products: summaries,
+  }
+}
+
+function handleGetProductDetail({ product_id }) {
+  const product = getProductById(product_id)
+  if (!product) {
+    return { found: false, message: `상품 ID '${product_id}'를 찾을 수 없습니다.` }
+  }
+  return { found: true, product }
+}
+
+// ──────────────────────────────────────────────
 // Tool 디스패처
 // ──────────────────────────────────────────────
 export function handleToolCall(name, input, ctx) {
@@ -867,6 +957,8 @@ export function handleToolCall(name, input, ctx) {
     case 'get_monthly_story':      return handleGetMonthlyStory(input, ctx)
     case 'get_savings_advice':     return handleGetSavingsAdvice(input, ctx)
     case 'compare_products':       return handleCompareProducts(input, ctx)
+    case 'search_products':        return handleSearchProducts(input)
+    case 'get_product_detail':     return handleGetProductDetail(input)
     default:
       return { error: `알 수 없는 tool: ${name}` }
   }

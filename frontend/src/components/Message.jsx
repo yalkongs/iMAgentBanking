@@ -12,6 +12,8 @@ import FinancialMomentCard from './FinancialMomentCard.jsx'
 import FinancialStoryCard from './FinancialStoryCard.jsx'
 import SavingsInsightCard from './SavingsInsightCard.jsx'
 import ProductCompareCard from './ProductCompareCard.jsx'
+import ProductListCard from './ProductListCard.jsx'
+import ProductDetailCard from './ProductDetailCard.jsx'
 
 export default function Message({ msg, sessionId, onTransferDone, onQuickAction, onClearScope, onGuiContextChange, voiceMode }) {
   // 이체 확인 카드
@@ -74,6 +76,12 @@ export default function Message({ msg, sessionId, onTransferDone, onQuickAction,
     }
     if (cardType === 'compare_products') {
       return <ProductCompareCard data={data} />
+    }
+    if (cardType === 'search_products') {
+      return <ProductListCard data={data} onQuickAction={onQuickAction} />
+    }
+    if (cardType === 'get_product_detail') {
+      return <ProductDetailCard data={data} onQuickAction={onQuickAction} />
     }
     return null
   }

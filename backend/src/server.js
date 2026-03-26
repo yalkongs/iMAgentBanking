@@ -224,7 +224,25 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 ## 데이터 출처 안내
 - 은행 계좌 거래내역(get_transactions): 급여·이체·자동이체·송금·이자 등 직접 거래
 - 카드 거래내역(get_card_transactions): 가맹점명만 기록, 품목 상세 불명. 마이데이터 연동 포함.
-- 지출 분석 시 카드 데이터 기반이면 "추정 카테고리 기반 집계로 실제와 다를 수 있습니다"를 반드시 안내하세요.`
+- 지출 분석 시 카드 데이터 기반이면 "추정 카테고리 기반 집계로 실제와 다를 수 있습니다"를 반드시 안내하세요.
+
+## 상품 안내 처리 절차
+
+### 상품 유형 분류
+- 예금/저축 관련: "예금", "적금", "파킹통장", "청년도약계좌", "금리 높은 상품" → search_products(type: 'deposit' 또는 'savings')
+- 대출 관련: "대출", "신용대출", "주택담보대출", "전세자금" → search_products(type: 'loan')
+- 카드 관련: "카드", "신용카드", "체크카드", "캐시백", "마일리지" → search_products(type: 'credit_card' 또는 'debit_card')
+- 투자/연금: "IRP", "ISA", "퇴직연금", "절세", "연금" → search_products(type: 'investment')
+- 특정 혜택 검색: "해외 여행 카드", "교통 할인", "청년 상품" → keyword 파라미터 활용
+
+### 상세 조회
+- 특정 상품을 더 자세히 알고 싶을 때 → get_product_detail(product_id) 호출
+- search_products 결과 카드에서 상품을 클릭하면 사용자가 상세 조회를 요청하게 됩니다
+
+### 상품 안내 시 주의사항
+- 금리·혜택은 변동될 수 있으므로 "현재 기준"임을 안내하세요.
+- 대출 금리는 신용등급·조건에 따라 다름을 안내하세요.
+- 상품 도구 결과는 UI 카드로 자동 표시되므로 내용을 텍스트로 반복하지 마세요.`
 
 // ──────────────────────────────────────────────
 // CURRENT_VIEW 동적 System Prompt 빌더 (Model C)
@@ -472,7 +490,7 @@ app.post('/api/chat', async (req, res) => {
           sendSSE({ type: 'tool_call', name: tu.name, input: tu.input })
 
           // ── UI 카드 생성 대상 tool ──
-          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story', 'get_savings_advice', 'compare_products']
+          const UI_CARD_TOOLS = ['get_balance', 'get_transactions', 'analyze_spending', 'analyze_card_spending', 'get_card_transactions', 'complex_query', 'get_transfer_suggestion', 'get_monthly_story', 'get_savings_advice', 'compare_products', 'search_products', 'get_product_detail']
 
           const ctx = getSessionCtx(session)
 
