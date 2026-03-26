@@ -639,6 +639,34 @@ app.post('/api/confirm-transfer', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// GET /api/accounts — 계좌 목록 + 마지막 거래 preview (메신저 UI용)
+// ──────────────────────────────────────────────
+app.get('/api/accounts', (req, res) => {
+  const sessionId = req.query.sessionId || 'default'
+  const session = getSession(sessionId)
+  const ctx = getSessionCtx(session)
+
+  const result = ctx.accounts.map((acc) => {
+    const lastTx = ctx.transactions
+      .filter((t) => t.accountId === acc.id)
+      .sort((a, b) => b.date.localeCompare(a.date))[0]
+
+    return {
+      ...acc,
+      balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
+      lastTransaction: lastTx
+        ? {
+            ...lastTx,
+            amountFormatted: (lastTx.amount > 0 ? '+' : '') + lastTx.amount.toLocaleString('ko-KR') + '원',
+          }
+        : null,
+    }
+  })
+
+  res.json({ accounts: result })
+})
+
+// ──────────────────────────────────────────────
 // GET /api/account/:id — 계좌 상세 (잔액 + 최근 거래)
 // ──────────────────────────────────────────────
 app.get('/api/account/:id', (req, res) => {
