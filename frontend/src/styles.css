@@ -90,7 +90,8 @@ input:focus-visible, textarea:focus-visible {
   display: flex;
   flex-direction: column;
   position: fixed;
-  top: 0;
+  /* iOS Safari 키보드: offsetTop(--vvtop)이 변하면 따라 내려와야 visual viewport와 일치 */
+  top: var(--vvtop, 0px);
   left: 0;
   right: 0;
   /* Android Chrome: visualViewport 높이 사용, 미지원 시 100dvh → 100vh 폴백 */

@@ -226,16 +226,23 @@ export default function App() {
 
   useEffect(() => () => txNotifTimersRef.current.forEach(clearTimeout), [])
 
-  // Android Chrome: visualViewport resize → CSS 변수로 실제 높이 전달
+  // visualViewport → CSS 변수 동기화
+  // resize: Android Chrome 키보드 (viewport 높이 변화)
+  // scroll: iOS Safari 키보드 (offsetTop 변화 — 이걸 빠뜨리면 입력창이 위로 사라짐)
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => {
       document.documentElement.style.setProperty('--vvh', `${vv.height}px`)
+      document.documentElement.style.setProperty('--vvtop', `${vv.offsetTop}px`)
     }
     update()
     vv.addEventListener('resize', update)
-    return () => vv.removeEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
   }, [])
 
   // 프로액티브 알림 로드
