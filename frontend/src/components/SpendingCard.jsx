@@ -18,6 +18,14 @@ export default function SpendingCard({ data, onQuickAction }) {
 
   const max = items[0]?.total || 1
 
+  // Model C: 지출 분석 카드의 컨텍스트 — 항목 클릭 시 AI에게 현재 화면 정보 전달
+  const spendingContext = onQuickAction ? {
+    view: 'spending_analysis',
+    period: data.period ? `${data.period.start}~${data.period.end}` : undefined,
+    totalSpending: data.total,
+    topCategory: items[0]?.category || items[0]?.counterpart,
+  } : undefined
+
   return (
     <div className="ui-card spending-card">
       <div className="spending-header">
@@ -40,11 +48,12 @@ export default function SpendingCard({ data, onQuickAction }) {
           const clickMsg = data.groupBy === 'counterpart'
             ? `${key} 거래 내역 보여줘`
             : `이번 달 ${key} 지출 자세히 알려줘`
+          const itemContext = spendingContext ? { ...spendingContext, focusedCategory: key } : undefined
           return (
             <button
               key={key}
               className="spending-item spending-item-btn"
-              onClick={() => onQuickAction && onQuickAction(clickMsg)}
+              onClick={() => onQuickAction && onQuickAction(clickMsg, itemContext)}
             >
               <div className="spending-item-row">
                 <div className="spending-dot" style={{ background: color }} />

@@ -320,6 +320,9 @@ export default function App() {
     }
   }, []))
 
+  // Model C: 현재 GUI 위치/상태를 추적하는 ref (sendMessage 클로저에서 읽음)
+  const currentGuiContextRef = useRef(null)
+
   // GUI 드릴-다운 scope 메시지 일괄 제거 (UI + 서버 AI 히스토리 동시 정리)
   const removeGuiScope = useCallback((scopeId) => {
     if (!scopeId) return
@@ -331,8 +334,8 @@ export default function App() {
     }).catch(() => {})
   }, [sessionId])
 
-  // 메시지 전송
-  const sendMessage = useCallback(async (text, guiScope = null) => {
+  // 메시지 전송 (guiContext: undefined = ref 값 사용, null = 명시적 없음, object = override)
+  const sendMessage = useCallback(async (text, guiScope = null, guiContext = undefined) => {
     const msg = text.trim()
     if (!msg || isLoading) return
 
@@ -361,7 +364,12 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, sessionId, guiScope }),
+        body: JSON.stringify({
+          message: msg,
+          sessionId,
+          guiScope,
+          guiContext: guiContext !== undefined ? guiContext : currentGuiContextRef.current,
+        }),
       })
 
       const reader = res.body.getReader()
@@ -449,6 +457,14 @@ export default function App() {
       currentGuiScopeRef.current = null
     }
   }, [isLoading, sessionId, ttsEnabled])
+
+  // Model C: 카드별 quickAction — overrideContext가 있으면 guiContext ref도 갱신
+  const handleQuickAction = useCallback((text, overrideContext) => {
+    if (overrideContext !== undefined) {
+      currentGuiContextRef.current = overrideContext
+    }
+    sendMessage(text, null, overrideContext)
+  }, [sendMessage])
 
   // 데모 모드: isLoading false 전환 시 다음 큐 실행 (TTS 완료 대기)
   useEffect(() => {
@@ -734,9 +750,10 @@ export default function App() {
                 key={msg.id}
                 msg={msg}
                 sessionId={sessionId}
-                onQuickAction={sendMessage}
+                onQuickAction={handleQuickAction}
                 onTransferDone={() => {}}
                 onClearScope={removeGuiScope}
+                onGuiContextChange={(ctx) => { currentGuiContextRef.current = ctx }}
                 voiceMode={voiceMode}
               />
             ))}

@@ -13,7 +13,7 @@ import FinancialStoryCard from './FinancialStoryCard.jsx'
 import SavingsInsightCard from './SavingsInsightCard.jsx'
 import ProductCompareCard from './ProductCompareCard.jsx'
 
-export default function Message({ msg, sessionId, onTransferDone, onQuickAction, onClearScope, voiceMode }) {
+export default function Message({ msg, sessionId, onTransferDone, onQuickAction, onClearScope, onGuiContextChange, voiceMode }) {
   // 이체 확인 카드
   if (msg.type === 'transfer_pending') {
     return (
@@ -54,7 +54,7 @@ export default function Message({ msg, sessionId, onTransferDone, onQuickAction,
   // UI 카드 (잔액, 거래, 분석 등)
   if (msg.type === 'ui_card') {
     const { cardType, data } = msg
-    if (cardType === 'get_balance') return <BalanceCard data={data} sessionId={sessionId} onQuickAction={onQuickAction} onClearScope={onClearScope} guiScope={msg.guiScope} />
+    if (cardType === 'get_balance') return <BalanceCard data={data} sessionId={sessionId} onQuickAction={onQuickAction} onClearScope={onClearScope} guiScope={msg.guiScope} onGuiContextChange={onGuiContextChange} />
     if (cardType === 'get_transactions') return <TransactionList data={data} onQuickAction={onQuickAction} />
     if (cardType === 'analyze_spending') return <SpendingCard data={data} onQuickAction={onQuickAction} />
     if (cardType === 'analyze_card_spending') return <SpendingCard data={data} onQuickAction={onQuickAction} />

@@ -36,8 +36,19 @@ const MOMENT_CONFIG = {
 }
 
 export default function FinancialMomentCard({ data, onQuickAction }) {
-  const { momentType = 'salary', title, amountFormatted, description, daysLeft } = data
+  const { momentType = 'salary', title, amountFormatted, description, daysLeft, dueAmount, dueDate } = data
   const cfg = MOMENT_CONFIG[momentType] || MOMENT_CONFIG.salary
+
+  // Model C: 이 모먼트 카드의 컨텍스트 — quickAction 발화 시 AI에게 전달
+  const momentContext = onQuickAction ? {
+    view: 'financial_moment',
+    momentType,
+    title,
+    amountFormatted,
+    ...(daysLeft !== undefined && { daysLeft }),
+    ...(dueAmount !== undefined && { dueAmount }),
+    ...(dueDate && { dueDate }),
+  } : undefined
 
   return (
     <div
@@ -63,7 +74,7 @@ export default function FinancialMomentCard({ data, onQuickAction }) {
       {onQuickAction && cfg.actions.length > 0 && (
         <div className="moment-actions">
           {cfg.actions.map((a) => (
-            <button key={a.label} className="moment-btn" onClick={() => onQuickAction(a.msg)}>
+            <button key={a.label} className="moment-btn" onClick={() => onQuickAction(a.msg, momentContext)}>
               {a.label}
             </button>
           ))}

@@ -1,10 +1,21 @@
 export default function TransactionAlertCard({ data, onQuickAction }) {
-  const { counterpart, amountFormatted, isIncome, category, memo, timestamp, aiComment } = data
+  const { counterpart, amountFormatted, isIncome, category, memo, timestamp, aiComment, amount } = data
+
+  // Model C: 이 알림 카드의 컨텍스트 — quickAction 발화 시 AI에게 전달
+  const alertContext = onQuickAction ? {
+    view: 'transaction_alert',
+    counterpart,
+    amount,
+    isIncome,
+    category,
+    amountFormatted,
+    timestamp,
+  } : undefined
 
   return (
     <div
       className={`tx-alert-card ${isIncome ? 'income' : 'expense'}${onQuickAction ? ' clickable' : ''}`}
-      onClick={onQuickAction ? () => onQuickAction('잔액 얼마야?') : undefined}
+      onClick={onQuickAction ? () => onQuickAction('잔액 얼마야?', alertContext) : undefined}
       title={onQuickAction ? '계좌 확인' : undefined}
     >
       <div className="tx-alert-icon">{isIncome ? '↓' : '↑'}</div>

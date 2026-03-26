@@ -89,6 +89,91 @@ compare_products    →  ProductCompareCard (Featured Hero)
 
 ---
 
+## 설계 철학: GUI의 계층 구조와 Chat의 시계열성 충돌 극복
+
+대화형 뱅킹을 실제 구현하면서 부딪히는 가장 근본적인 인터페이스 문제가 있다.
+
+**GUI는 계층적·가역적**, **Chat은 시계열적·불가역적**이다.
+
+```
+GUI (공간 은유)              Chat (시간 은유)
+────────────────             ─────────────────
+┌─ 잔액 개요 ─────┐          [msg 1]
+│  ┌─ 계좌 상세 ─┐│          [msg 2]
+│  │  (지금 여기)││          [msg 3] ← 현재
+│  └────────────┘│          [msg 4] (미래)
+└────────────────┘
+ 위치: "어디"                 시간: "언제"
+ 이동: 가역 (← 뒤로)          이동: 불가역
+ 상태: 계층 트리               상태: 선형 누적
+```
+
+사용자는 GUI를 **지도(map)**로, Chat을 **일지(journal)**로 인식한다. 이 두 은유가 충돌할 때 다음 혼선이 생긴다.
+
+| 충돌 유형 | 예시 |
+|-----------|------|
+| **맥락 잔류** | 계좌 상세 진입 → 질문 → 뒤로 → "아까 만기 언제랬지?" → AI: 기억 없음 |
+| **의도 귀속 모호** | 정기예금 화면에서 "이체해줘" → AI: 어느 계좌에서? |
+| **알림 끼어들기** | 탐색 중 입출금 알림 클릭 → 이전 계좌 컨텍스트와 섞임 |
+| **중복 누적** | 같은 계좌 반복 진입 → AI 메모리에 동일 컨텍스트 N회 쌓임 |
+
+### 해결: Working Memory Model (Model C)
+
+인간의 인지 구조에서 차용한 아키텍처다.
+
+```
+인간 인지                  이 앱의 구현
+──────────────────         ──────────────────────────────────
+장기 기억                  Message History (삭제 없이 누적)
+  "지난 대화들"              role: user/assistant 배열
+
+작업 기억                  System Prompt — [CURRENT_VIEW] 블록
+  "지금 눈 앞에 있는 것"      GUI 상태 변화 시 실시간 교체
+
+주의 전환                  GUI 내비게이션
+  "다른 곳을 보기 시작"        → CURRENT_VIEW만 갱신
+                             → Message History는 그대로
+```
+
+GUI 내비게이션이 발생할 때마다 System Prompt의 `[CURRENT_VIEW]` 블록만 교체한다. 대화 히스토리는 건드리지 않는다.
+
+```
+[CURRENT_VIEW]
+view: account_detail
+accountId: acc002
+accountName: iM 정기적금
+accountType: 정기적금
+balance: 3,850,000원
+interestRate: 연 3.5%
+maturityDate: 2026-04-01
+daysToMaturity: 6일 후 만기
+[/CURRENT_VIEW]
+사용자가 "이거", "이 계좌", "여기" 등 지시어를 쓰면 위 CURRENT_VIEW를 기준으로 해석하세요.
+```
+
+#### 각 카드의 책임 분리
+
+UI 카드 각각이 자신의 컨텍스트를 알고, `onQuickAction` 호출 시 함께 전달한다.
+
+| 카드 | 전달하는 컨텍스트 |
+|------|-----------------|
+| `BalanceCard` (드릴인) | `view: account_detail` + 계좌 정보 |
+| `BalanceCard` (드릴아웃) | `view: balance_overview` + 총 잔액 |
+| `TransactionAlertCard` | `view: transaction_alert` + 거래 정보 |
+| `FinancialMomentCard` | `view: financial_moment` + 모먼트 정보 |
+| `SpendingCard` | `view: spending_analysis` + 분석 기간/카테고리 |
+
+#### 이전 방식(A+B) 대비 개선
+
+| 시나리오 | A+B (삭제 기반) | Working Memory |
+|---------|---------------|---------------|
+| "아까 본 계좌 만기가?" | ❌ 삭제돼서 모름 | ✅ 히스토리에 남아있음 |
+| "이거 해지하면?" | ❌ "이거"가 모호 | ✅ CURRENT_VIEW로 해소 |
+| 정기예금에서 "이체해줘" | 계좌 타입 모름 | ✅ term_deposit 감지 → 경고 분기 |
+| 입출금 알림 클릭 후 질문 | 컨텍스트 섞임 | ✅ alert context가 override |
+
+---
+
 ## 기술 스택
 
 **Frontend**

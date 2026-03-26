@@ -103,6 +103,8 @@ const FINANCIAL_MOMENTS = [
     momentType: 'card_due',
     title: '신한카드 결제일이 3일 남았습니다',
     amountFormatted: '485,000원',
+    dueAmount: 485000,
+    dueDate: '2026-04-15',
     description: '3월 카드 이용금액 485,000원이 4월 15일에 자동 결제됩니다.',
     daysLeft: 3,
   },
@@ -225,6 +227,49 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 - 지출 분석 시 카드 데이터 기반이면 "추정 카테고리 기반 집계로 실제와 다를 수 있습니다"를 반드시 안내하세요.`
 
 // ──────────────────────────────────────────────
+// CURRENT_VIEW 동적 System Prompt 빌더 (Model C)
+// GUI 상태를 System Prompt에 주입해 AI가 "지금 화면이 어딘지" 항상 인식하게 함
+// ──────────────────────────────────────────────
+function buildSystemPrompt(guiContext) {
+  if (!guiContext) return SYSTEM_PROMPT
+  const lines = ['', '[CURRENT_VIEW]']
+  const {
+    view, accountId, accountName, accountType, balance, totalBalance,
+    interestRate, maturityDate, daysToMaturity,
+    momentType, title, amountFormatted, daysLeft, dueAmount, dueDate,
+    counterpart, amount, isIncome, category,
+    period, topCategory,
+  } = guiContext
+  if (view) lines.push(`view: ${view}`)
+  if (accountId) lines.push(`accountId: ${accountId}`)
+  if (accountName) lines.push(`accountName: ${accountName}`)
+  if (accountType) {
+    const typeLabel = { checking: '입출금', installment_savings: '정기적금', term_deposit: '정기예금', savings: '저축', cma: 'CMA' }
+    lines.push(`accountType: ${typeLabel[accountType] || accountType}`)
+  }
+  if (balance !== undefined) lines.push(`balance: ${balance.toLocaleString('ko-KR')}원`)
+  if (totalBalance !== undefined) lines.push(`totalBalance: ${totalBalance.toLocaleString('ko-KR')}원`)
+  if (interestRate) lines.push(`interestRate: 연 ${interestRate}%`)
+  if (maturityDate) lines.push(`maturityDate: ${maturityDate}`)
+  if (daysToMaturity !== undefined) lines.push(`daysToMaturity: ${daysToMaturity}일 후 만기`)
+  if (momentType) lines.push(`momentType: ${momentType}`)
+  if (title) lines.push(`title: ${title}`)
+  if (amountFormatted) lines.push(`amount: ${amountFormatted}`)
+  if (dueAmount !== undefined) lines.push(`dueAmount: ${dueAmount.toLocaleString('ko-KR')}원`)
+  if (dueDate) lines.push(`dueDate: ${dueDate}`)
+  if (daysLeft !== undefined) lines.push(`daysLeft: D-${daysLeft}`)
+  if (counterpart) lines.push(`counterpart: ${counterpart}`)
+  if (amount !== undefined) lines.push(`transactionAmount: ${(amount > 0 ? '+' : '') + amount.toLocaleString('ko-KR')}원`)
+  if (isIncome !== undefined) lines.push(`direction: ${isIncome ? '입금' : '출금'}`)
+  if (category) lines.push(`category: ${category}`)
+  if (period) lines.push(`analysisPeriod: ${period}`)
+  if (topCategory) lines.push(`topSpendingCategory: ${topCategory}`)
+  lines.push('[/CURRENT_VIEW]')
+  lines.push('사용자가 "이거", "이 계좌", "여기", "지금 보는" 등 지시어를 쓰면 위 CURRENT_VIEW 정보를 기준으로 해석하세요.')
+  return SYSTEM_PROMPT + lines.join('\n')
+}
+
+// ──────────────────────────────────────────────
 // POST /api/whisper — 음성 → 텍스트
 // ──────────────────────────────────────────────
 app.post('/api/whisper', upload.single('audio'), async (req, res) => {
@@ -331,7 +376,7 @@ app.post('/api/clear-gui-scope', (req, res) => {
 // POST /api/chat — Claude Tool Use + SSE 스트리밍
 // ──────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId = 'default', guiScope = null } = req.body
+  const { message, sessionId = 'default', guiScope = null, guiContext = null } = req.body
   if (!message) return res.status(400).json({ error: 'message가 없습니다.' })
 
   // SSE 헤더
@@ -372,7 +417,7 @@ app.post('/api/chat', async (req, res) => {
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(guiContext),
         tools: toolDefinitions,
         tool_choice: toolChoice,
         messages: session.messages.map(({ _guiScope, ...m }) => m),

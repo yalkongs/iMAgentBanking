@@ -106,7 +106,7 @@ function AccountDetailView({ accountId, sessionId, onBack, onQuickAction }) {
   )
 }
 
-export default function BalanceCard({ data, sessionId, onQuickAction, onClearScope, guiScope: cardGuiScope, initialAccountId }) {
+export default function BalanceCard({ data, sessionId, onQuickAction, onClearScope, guiScope: cardGuiScope, initialAccountId, onGuiContextChange }) {
   const accounts = data.accounts || []
   const [selectedId, setSelectedId] = useState(initialAccountId || null)
   // 이 카드에서 드릴-다운 시 생성되는 메시지의 scope ID
@@ -119,6 +119,25 @@ export default function BalanceCard({ data, sessionId, onQuickAction, onClearSco
     }
     detailScopeRef.current = `balance-detail-${accId}-${Date.now()}`
     setSelectedId(accId)
+
+    // Model C: 현재 GUI 위치를 AI에게 알림 (계좌 상세 진입)
+    const acc = accounts.find((a) => a.id === accId)
+    if (acc && onGuiContextChange) {
+      const today = new Date()
+      const daysToMaturity = acc.maturityDate
+        ? Math.ceil((new Date(acc.maturityDate) - today) / 86400000)
+        : undefined
+      onGuiContextChange({
+        view: 'account_detail',
+        accountId: accId,
+        accountName: acc.name,
+        accountType: acc.type,
+        balance: acc.balance,
+        ...(acc.interestRate && { interestRate: acc.interestRate }),
+        ...(acc.maturityDate && { maturityDate: acc.maturityDate }),
+        ...(daysToMaturity !== undefined && { daysToMaturity }),
+      })
+    }
   }
 
   function drillOut() {
@@ -127,6 +146,15 @@ export default function BalanceCard({ data, sessionId, onQuickAction, onClearSco
       detailScopeRef.current = null
     }
     setSelectedId(null)
+
+    // Model C: 계좌 목록 overview로 복귀
+    if (onGuiContextChange) {
+      onGuiContextChange({
+        view: 'balance_overview',
+        totalBalance: data.totalBalance,
+        accountCount: accounts.length,
+      })
+    }
   }
 
   if (selectedId) {
