@@ -690,6 +690,76 @@ app.get('/api/account/:id', (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// POST /api/room-greeting — Living Accounts 프로액티브 AI 인사말 (SSE)
+// ──────────────────────────────────────────────
+app.post('/api/room-greeting', async (req, res) => {
+  const { sessionId = 'default', accountId } = req.body
+  if (!accountId) return res.status(400).json({ error: 'accountId가 없습니다.' })
+
+  const session = getSession(sessionId)
+  const ctx = getSessionCtx(session)
+
+  const acc = ctx.accounts.find((a) => a.id === accountId)
+  if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
+
+  const recentTxs = ctx.transactions
+    .filter((t) => t.accountId === accountId)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5)
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  const sendSSE = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
+
+  const TYPE_LABEL = { checking: '입출금', installment_savings: '정기적금', term_deposit: '정기예금', savings: '비상금', cma: 'CMA' }
+  const PERSONA = {
+    checking: '실용적이고 친근한 어조. 최근 지출 패턴이나 자주 쓴 곳을 언급.',
+    installment_savings: '격려적이고 따뜻한 어조. 납입 현황, 목표 달성 진도 언급.',
+    term_deposit: '신중하고 안정적인 어조. 금리, 만기일, 예상 이자 언급.',
+    savings: '부드럽고 안심시키는 어조. 모인 금액, 비상금 충분도 언급.',
+    cma: '분석적이고 전문적인 어조. 수익률, 운용 현황 언급.',
+  }
+
+  const txSummary = recentTxs.length > 0
+    ? recentTxs.map((t) => `${t.counterpart} ${t.amount > 0 ? '+' : ''}${t.amount.toLocaleString('ko-KR')}원 (${t.date})`).join(' / ')
+    : '최근 거래 없음'
+
+  const prompt = `당신은 iM뱅크 AI 어시스턴트입니다. 고객이 방금 "${acc.name}" (${TYPE_LABEL[acc.type] || acc.type} 계좌, 잔액 ${acc.balance.toLocaleString('ko-KR')}원) 채팅방에 입장했습니다.
+
+최근 거래: ${txSummary}
+
+어조 지침: ${PERSONA[acc.type] || '친근한 어조.'}
+
+규칙:
+- 1-2문장만. 짧고 자연스럽게.
+- 이모지 절대 금지.
+- "안녕하세요" 같은 인사말 없이 바로 개인화된 관찰로 시작.
+- 구체적 수치(금액, 날짜, %)를 포함하면 더 좋음.`
+
+  try {
+    const stream = anthropic.messages.stream({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 120,
+      messages: [{ role: 'user', content: prompt }],
+    })
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        sendSSE({ type: 'text', delta: event.delta.text })
+      }
+    }
+    sendSSE({ type: 'done' })
+    res.end()
+  } catch (err) {
+    console.error('Room greeting error:', err)
+    sendSSE({ type: 'done' })
+    res.end()
+  }
+})
+
+// ──────────────────────────────────────────────
 // POST /api/reset — 세션 초기화
 // ──────────────────────────────────────────────
 app.post('/api/reset', (req, res) => {
