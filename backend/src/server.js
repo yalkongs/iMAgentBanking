@@ -44,12 +44,15 @@ function broadcastWsEvent(event) {
 
 // ── 백그라운드 입출금 시뮬레이터 ──
 const BG_TRANSACTIONS = [
-  { counterpart: '국민건강보험공단', amount: -139230, category: '자동이체', memo: '건강보험료 자동이체' },
-  { counterpart: '한국전력', amount: -52400, category: '자동이체', memo: '전기요금' },
-  { counterpart: '(주)카카오뱅크', amount: 3000000, category: '이체', memo: '전세자금 입금' },
-  { counterpart: '쿠팡', amount: -87900, category: '이체', memo: '쿠팡 결제' },
-  { counterpart: '박재원', amount: 150000, category: '송금', memo: '' },
-  { counterpart: 'LG유플러스', amount: -55000, category: '자동이체', memo: '통신요금' },
+  { accountId: 'acc001', counterpart: '국민건강보험공단', amount: -139230, category: '자동이체', memo: '건강보험료 자동이체' },
+  { accountId: 'acc001', counterpart: '한국전력', amount: -52400, category: '자동이체', memo: '전기요금' },
+  { accountId: 'acc001', counterpart: '(주)카카오뱅크', amount: 3000000, category: '이체', memo: '전세자금 입금' },
+  { accountId: 'acc001', counterpart: '쿠팡', amount: -87900, category: '이체', memo: '쿠팡 결제' },
+  { accountId: 'acc001', counterpart: '박재원', amount: 150000, category: '송금', memo: '' },
+  { accountId: 'acc001', counterpart: 'LG유플러스', amount: -55000, category: '자동이체', memo: '통신요금' },
+  { accountId: 'acc006', counterpart: '스타벅스', amount: -6500, category: '카페', memo: '아메리카노', source: 'card' },
+  { accountId: 'acc006', counterpart: 'GS25', amount: -4200, category: '편의점', memo: '', source: 'card' },
+  { accountId: 'acc006', counterpart: '올리브영', amount: -35800, category: '쇼핑', memo: '', source: 'card' },
 ]
 
 let bgTxIndex = 0
@@ -92,6 +95,29 @@ setInterval(async () => {
 }, 90000) // 90초마다 (1회/분 이하)
 
 // ── 금융 모먼트 시뮬레이터 (급여, 카드대금 D-3) ──
+// ── 적금 납입일 계산 ──
+function getInstallmentReminders() {
+  const now = new Date()
+  const reminders = []
+  const accounts = getInitialAccounts()
+  for (const acc of accounts) {
+    if (acc.type !== 'installment_savings' || !acc.openDate || !acc.monthlyDeposit) continue
+    const paymentDay = new Date(acc.openDate).getDate()
+    let next = new Date(now.getFullYear(), now.getMonth(), paymentDay)
+    if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, paymentDay)
+    const daysLeft = Math.ceil((next - now) / 86400000)
+    reminders.push({
+      momentType: 'installment_reminder',
+      accountId: acc.id,
+      title: `${acc.name} 납입일이 ${daysLeft}일 남았습니다`,
+      amountFormatted: acc.monthlyDeposit.toLocaleString('ko-KR') + '원',
+      description: `${next.getMonth() + 1}월 ${next.getDate()}일에 ${acc.monthlyDeposit.toLocaleString('ko-KR')}원이 자동 이체됩니다. 주계좌 잔액을 미리 확인해 두세요.`,
+      daysLeft,
+    })
+  }
+  return reminders
+}
+
 const FINANCIAL_MOMENTS = [
   {
     momentType: 'salary',
@@ -101,13 +127,14 @@ const FINANCIAL_MOMENTS = [
   },
   {
     momentType: 'card_due',
-    title: '신한카드 결제일이 3일 남았습니다',
+    title: 'iM 체크카드 결제일이 3일 남았습니다',
     amountFormatted: '485,000원',
     dueAmount: 485000,
     dueDate: '2026-04-15',
     description: '3월 카드 이용금액 485,000원이 4월 15일에 자동 결제됩니다.',
     daysLeft: 3,
   },
+  ...getInstallmentReminders(),
 ]
 
 let momentIndex = 0
@@ -639,35 +666,119 @@ app.post('/api/confirm-transfer', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────
-// GET /api/accounts — 계좌 목록 + 마지막 거래 preview (메신저 UI용)
+// GET /api/accounts — 계좌 목록 + 마지막 거래 preview
 // ──────────────────────────────────────────────
 app.get('/api/accounts', (req, res) => {
   const sessionId = req.query.sessionId || 'default'
   const session = getSession(sessionId)
   const ctx = getSessionCtx(session)
 
+  const now = new Date()
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+
   const result = ctx.accounts.map((acc) => {
     const lastTx = ctx.transactions
       .filter((t) => t.accountId === acc.id)
-      .sort((a, b) => b.date.localeCompare(a.date))[0]
+      .sort((a, b) => b.date.localeCompare(a.date))[0] || null
+
+    // debit_card: balance = 이번달 사용 금액 (절댓값)
+    let displayBalance = acc.balance
+    let balanceFormatted
+    if (acc.type === 'debit_card') {
+      displayBalance = Math.abs(ctx.transactions
+        .filter((t) => t.accountId === acc.id && t.date >= thisMonthStart && t.amount < 0)
+        .reduce((sum, t) => sum + t.amount, 0))
+      balanceFormatted = `이번달 ${displayBalance.toLocaleString('ko-KR')}원 사용`
+    } else if (acc.isPromo) {
+      displayBalance = 0
+      balanceFormatted = '발급 가능'
+    } else {
+      balanceFormatted = acc.balance.toLocaleString('ko-KR') + '원'
+    }
+
+    // 예금/적금/CMA: 만기 진행률 + 상품별 상세 지표
+    let maturityInfo = null
+    if (acc.type === 'cma' && acc.openDate) {
+      // CMA: maturityDate 없음 — openDate 기준 경과일만 사용
+      const start = new Date(acc.openDate).getTime()
+      const elapsedMs = Math.max(0, now.getTime() - start)
+      const elapsedDays = Math.ceil(elapsedMs / 86400000)
+      const dailyRate = (acc.interestRate || 0) / 100 / 365
+      const todayInterest = Math.round(acc.balance * dailyRate)
+      const accruedInterest = Math.round(acc.balance * dailyRate * elapsedDays)
+      maturityInfo = { progressRatio: 0, daysRemaining: 0, elapsedDays, totalDays: elapsedDays, accruedInterest, todayInterest }
+    } else if (acc.openDate && acc.maturityDate) {
+      const start = new Date(acc.openDate).getTime()
+      const end = new Date(acc.maturityDate).getTime()
+      const nowMs = now.getTime()
+      const totalMs = end - start
+      const elapsedMs = Math.max(0, Math.min(nowMs - start, totalMs))
+      const progressRatio = Math.max(0, Math.min(1, elapsedMs / totalMs))
+      const daysRemaining = Math.max(0, Math.ceil((end - nowMs) / 86400000))
+      const elapsedDays = Math.ceil(elapsedMs / 86400000)
+      const totalDays = Math.ceil(totalMs / 86400000)
+
+      if (acc.type === 'term_deposit') {
+        // 예금: 단리, 만기 이자 = 원금 × 금리
+        const expectedInterest = Math.round(acc.balance * (acc.interestRate / 100))
+        const accruedInterest = Math.round(expectedInterest * (elapsedDays / totalDays))
+        const finalAmount = acc.balance + expectedInterest
+        // 중도해지: 중도해지 이율 0.5% 적용
+        const earlyRate = 0.5
+        const earlyInterest = Math.round(acc.balance * (earlyRate / 100) * (elapsedDays / 365))
+        const earlyWithdrawalLoss = accruedInterest - earlyInterest
+        maturityInfo = {
+          progressRatio, daysRemaining, elapsedDays, totalDays,
+          accruedInterest, expectedInterest, finalAmount,
+          earlyInterest, earlyWithdrawalLoss,
+        }
+      } else if (acc.type === 'installment_savings') {
+        // 적금: 납입 횟수 기반
+        const totalMonths = Math.round(totalMs / (30.4375 * 86400000))
+        const paymentsMade = Math.min(totalMonths, Math.floor(elapsedMs / (30.4375 * 86400000)))
+        const paymentsRemaining = Math.max(0, totalMonths - paymentsMade)
+        const monthlyDeposit = acc.monthlyDeposit || 0
+        const monthlyRate = (acc.interestRate || 0) / 100 / 12
+        const expectedInterest = Math.round(monthlyDeposit * monthlyRate * totalMonths * (totalMonths - 1) / 2)
+        const finalAmount = totalMonths * monthlyDeposit + expectedInterest
+        const accruedInterest = Math.round(monthlyDeposit * monthlyRate * paymentsMade * (paymentsMade - 1) / 2)
+        const principalAtMaturity = totalMonths * monthlyDeposit
+        // 중도해지: 중도해지 이율 0.5%
+        const earlyRate = 0.5
+        const currentPrincipal = paymentsMade * monthlyDeposit
+        const earlyInterest = Math.round(currentPrincipal * (earlyRate / 100) * (elapsedDays / 365))
+        const earlyWithdrawalLoss = accruedInterest - earlyInterest
+        maturityInfo = {
+          progressRatio, daysRemaining, elapsedDays, totalDays,
+          accruedInterest, expectedInterest, finalAmount,
+          totalPayments: totalMonths, paymentsMade, paymentsRemaining,
+          principalAtMaturity, earlyInterest, earlyWithdrawalLoss,
+        }
+      }
+    }
 
     return {
       ...acc,
-      balanceFormatted: acc.balance.toLocaleString('ko-KR') + '원',
+      balance: displayBalance,
+      balanceFormatted,
+      ...(maturityInfo || {}),
       lastTransaction: lastTx
         ? {
-            ...lastTx,
-            amountFormatted: (lastTx.amount > 0 ? '+' : '') + lastTx.amount.toLocaleString('ko-KR') + '원',
+            counterpart: lastTx.counterpart,
+            amount: lastTx.amount,
+            amountFormatted: (lastTx.amount > 0 ? '+' : '') + Math.abs(lastTx.amount).toLocaleString('ko-KR') + '원',
+            date: lastTx.date,
+            isIncome: lastTx.amount > 0,
           }
         : null,
     }
   })
-
   res.json({ accounts: result })
 })
 
 // ──────────────────────────────────────────────
-// GET /api/account/:id — 계좌 상세 (잔액 + 최근 거래)
+// GET /api/account/:id — 계좌 상세 (잔액 + 거래 페이지네이션)
+// query: page (1-based, default 1), limit (default 20)
 // ──────────────────────────────────────────────
 app.get('/api/account/:id', (req, res) => {
   const sessionId = req.query.sessionId || 'default'
@@ -677,86 +788,27 @@ app.get('/api/account/:id', (req, res) => {
   const acc = ctx.accounts.find((a) => a.id === req.params.id)
   if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
 
-  const recentTransactions = ctx.transactions
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1)
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20))
+  const offset = (page - 1) * limit
+
+  const allTxs = ctx.transactions
     .filter((t) => t.accountId === acc.id)
     .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5)
+
+  const total = allTxs.length
+  const recentTransactions = allTxs
+    .slice(offset, offset + limit)
     .map((t) => ({
       ...t,
       amountFormatted: (t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR') + '원',
     }))
 
-  res.json({ account: acc, recentTransactions })
-})
-
-// ──────────────────────────────────────────────
-// POST /api/room-greeting — Living Accounts 프로액티브 AI 인사말 (SSE)
-// ──────────────────────────────────────────────
-app.post('/api/room-greeting', async (req, res) => {
-  const { sessionId = 'default', accountId } = req.body
-  if (!accountId) return res.status(400).json({ error: 'accountId가 없습니다.' })
-
-  const session = getSession(sessionId)
-  const ctx = getSessionCtx(session)
-
-  const acc = ctx.accounts.find((a) => a.id === accountId)
-  if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
-
-  const recentTxs = ctx.transactions
-    .filter((t) => t.accountId === accountId)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5)
-
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-
-  const sendSSE = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
-
-  const TYPE_LABEL = { checking: '입출금', installment_savings: '정기적금', term_deposit: '정기예금', savings: '비상금', cma: 'CMA' }
-  const PERSONA = {
-    checking: '실용적이고 친근한 어조. 최근 지출 패턴이나 자주 쓴 곳을 언급.',
-    installment_savings: '격려적이고 따뜻한 어조. 납입 현황, 목표 달성 진도 언급.',
-    term_deposit: '신중하고 안정적인 어조. 금리, 만기일, 예상 이자 언급.',
-    savings: '부드럽고 안심시키는 어조. 모인 금액, 비상금 충분도 언급.',
-    cma: '분석적이고 전문적인 어조. 수익률, 운용 현황 언급.',
-  }
-
-  const txSummary = recentTxs.length > 0
-    ? recentTxs.map((t) => `${t.counterpart} ${t.amount > 0 ? '+' : ''}${t.amount.toLocaleString('ko-KR')}원 (${t.date})`).join(' / ')
-    : '최근 거래 없음'
-
-  const prompt = `당신은 iM뱅크 AI 어시스턴트입니다. 고객이 방금 "${acc.name}" (${TYPE_LABEL[acc.type] || acc.type} 계좌, 잔액 ${acc.balance.toLocaleString('ko-KR')}원) 채팅방에 입장했습니다.
-
-최근 거래: ${txSummary}
-
-어조 지침: ${PERSONA[acc.type] || '친근한 어조.'}
-
-규칙:
-- 1-2문장만. 짧고 자연스럽게.
-- 이모지 절대 금지.
-- "안녕하세요" 같은 인사말 없이 바로 개인화된 관찰로 시작.
-- 구체적 수치(금액, 날짜, %)를 포함하면 더 좋음.`
-
-  try {
-    const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 120,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        sendSSE({ type: 'text', delta: event.delta.text })
-      }
-    }
-    sendSSE({ type: 'done' })
-    res.end()
-  } catch (err) {
-    console.error('Room greeting error:', err)
-    sendSSE({ type: 'done' })
-    res.end()
-  }
+  res.json({
+    account: acc,
+    recentTransactions,
+    pagination: { page, limit, total, hasMore: offset + limit < total },
+  })
 })
 
 // ──────────────────────────────────────────────
@@ -798,6 +850,95 @@ app.get('/api/health-score', (req, res) => {
   score = Math.max(0, Math.min(100, score))
 
   res.json({ score, savingsRate: Math.round(savingsRate * 100), income, expense })
+})
+
+// ──────────────────────────────────────────────
+// POST /api/room-greeting — 계좌방 첫 입장 AI 인사말 (SSE)
+// ──────────────────────────────────────────────
+const ROOM_GREETING_PROMPTS = {
+  checking:            '입출금 계좌 담당 AI로서 오늘의 입출금 현황과 관련해 사용자에게 먼저 말을 걸어라. 1-2문장. 이모지 금지. 격식체(~입니다, ~까?).',
+  installment_savings: '정기적금 계좌 담당 AI로서 적금 목표 달성과 관련해 격려하며 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
+  term_deposit:        '정기예금 계좌 담당 AI로서 예금 만기/금리 관련해 신중하게 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
+  savings:             '비상금 계좌 담당 AI로서 비상금 현황과 관련해 안심시키며 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
+  cma:                 'CMA 계좌 담당 AI로서 수익률/운용 현황과 관련해 분석적으로 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
+  debit_card:          'iM 체크카드 담당 AI로서 최근 카드 사용 패턴(카페·쇼핑·식비 지출 등)을 바탕으로 소비 현황을 짧게 언급하며 먼저 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
+  credit_card:         'iM 신용카드 상품 안내 AI로서, 아직 신용카드가 없는 고객에게 iM 신용카드의 대표 혜택(적립·캐시백·할인)과 간단한 발급 방법을 친근하게 안내하라. 2-3문장. 이모지 금지. 격식체.',
+}
+
+app.post('/api/room-greeting', async (req, res) => {
+  const { sessionId = 'default', accountId } = req.body
+  const session = getSession(sessionId)
+  const ctx = getSessionCtx(session)
+
+  const acc = ctx.accounts.find((a) => a.id === accountId)
+  if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
+
+  const recentTxs = ctx.transactions
+    .filter((t) => t.accountId === acc.id)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 3)
+    .map((t) => `${t.counterpart} ${(t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR')}원`)
+    .join(', ')
+
+  let prompt = ROOM_GREETING_PROMPTS[acc.type] || ROOM_GREETING_PROMPTS.checking
+  let context = `계좌명: ${acc.name}, 잔액: ${acc.balance.toLocaleString('ko-KR')}원${recentTxs ? `, 최근 거래: ${recentTxs}` : ''}`
+
+  // ② 만기 임박 (30일 이하): 재예치/재투자 행동 유도
+  if (acc.maturityDate && (acc.type === 'installment_savings' || acc.type === 'term_deposit')) {
+    const greetNow = new Date()
+    const daysLeft = Math.max(0, Math.ceil((new Date(acc.maturityDate) - greetNow) / 86400000))
+    if (daysLeft <= 30 && daysLeft > 0) {
+      const typeLabel = acc.type === 'installment_savings' ? '정기적금' : '정기예금'
+      prompt = `${typeLabel}이 ${daysLeft}일 후 만기됩니다. 만기 수령금 활용 방안(재예치·운용·목돈 계획)에 대해 AI 매니저로서 먼저 물어보며 조언을 제안하라. 2문장 이내. 이모지 금지. 격식체.`
+      context += `, 만기까지: ${daysLeft}일`
+    }
+  }
+
+  // ④ 입출금 계좌 월간 리포트 (월초 1-5일: 지난달 정산 / 월말 25일~: 이달 마감 리포트)
+  if (acc.type === 'checking') {
+    const dayOfMonth = new Date().getDate()
+    const txNow = ctx.transactions.filter((t) => t.accountId === acc.id)
+    if (dayOfMonth <= 5) {
+      const prev = new Date(); prev.setMonth(prev.getMonth() - 1)
+      const prevStart = new Date(prev.getFullYear(), prev.getMonth(), 1).toISOString().slice(0, 10)
+      const prevEnd = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).toISOString().slice(0, 10)
+      const prevTxs = txNow.filter((t) => t.date >= prevStart && t.date <= prevEnd)
+      const income = prevTxs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+      const expense = Math.abs(prevTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+      const net = income - expense
+      context += `, 지난달 입금 ${income.toLocaleString('ko-KR')}원, 지출 ${expense.toLocaleString('ko-KR')}원, 순저축 ${net.toLocaleString('ko-KR')}원`
+      prompt = '새 달이 시작됐습니다. 지난 달 재정 요약(입금·지출·순저축)을 바탕으로 이번 달을 응원하며 간결하게 리포트하라. 2문장. 이모지 금지. 격식체.'
+    } else if (dayOfMonth >= 25) {
+      const thisStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+      const thisTxs = txNow.filter((t) => t.date >= thisStart)
+      const thisExpense = Math.abs(thisTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+      context += `, 이번달 지출 ${thisExpense.toLocaleString('ko-KR')}원`
+      prompt = '월말이 다가옵니다. 이번 달 지출 현황과 잔액을 언급하며 월말 재정 정리를 돕겠다고 먼저 말을 걸어라. 2문장. 이모지 금지. 격식체.'
+    }
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  try {
+    const stream = anthropic.messages.stream({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      messages: [{ role: 'user', content: `${context}\n\n${prompt}` }],
+    })
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        res.write(`data: ${JSON.stringify({ type: 'text', delta: event.delta.text })}\n\n`)
+      }
+    }
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+  } catch {
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
+  } finally {
+    res.end()
+  }
 })
 
 // ──────────────────────────────────────────────
