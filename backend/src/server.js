@@ -781,7 +781,7 @@ app.post('/api/chat', async (req, res) => {
 // POST /api/confirm-transfer — 이체 확인
 // ──────────────────────────────────────────────
 app.post('/api/confirm-transfer', async (req, res) => {
-  const { sessionId = 'default', confirmed, from_account_id: selectedAccountId } = req.body
+  const { sessionId = 'default', confirmed, from_account_id: selectedAccountId, amount: overrideAmount } = req.body
   const session = getSession(sessionId)
 
   if (!session.pendingTransfer) {
@@ -796,11 +796,15 @@ app.post('/api/confirm-transfer', async (req, res) => {
     return res.json({ success: false, cancelled: true, message: '이체가 취소되었습니다.' })
   }
 
-  // 실제 이체 실행 (프론트에서 선택한 계좌 우선)
+  // 실제 이체 실행 (프론트에서 입력한 금액/계좌 우선)
+  const finalAmount = (overrideAmount && overrideAmount > 0) ? overrideAmount : pending.amount
+  if (!finalAmount || finalAmount <= 0) {
+    return res.status(400).json({ success: false, error: '이체 금액을 입력해 주세요.' })
+  }
   const ctx = getSessionCtx(session)
   const result = executeTransfer({
     to_contact: pending.to_contact,
-    amount: pending.amount,
+    amount: finalAmount,
     from_account_id: selectedAccountId || pending.from_account_id,
     memo: pending.memo,
   }, ctx)
@@ -1291,8 +1295,8 @@ app.get('/api/contacts', (req, res) => {
 app.post('/api/quick-transfer', (req, res) => {
   const { sessionId = 'default', contactId, amount } = req.body
 
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: 'amount는 0보다 커야 합니다.' })
+  if (!contactId) {
+    return res.status(400).json({ error: 'contactId가 필요합니다.' })
   }
 
   const contact = contacts.find((c) => c.id === contactId)
@@ -1306,24 +1310,32 @@ app.post('/api/quick-transfer', (req, res) => {
     return res.status(400).json({ error: '입출금 계좌가 없습니다.' })
   }
 
+  const safeAmount = Number(amount) || 0
+
   const pendingData = {
     toolUseId: 'quick_' + Date.now(),
     to_contact: contact.realName,
-    amount,
+    amount: safeAmount,
     from_account_id: checkingAcc.id,
     memo: '',
     contactInfo: contact,
   }
   session.pendingTransfer = pendingData
 
-  const amountFmt = amount.toLocaleString('ko-KR') + '원'
+  const amountFmt = safeAmount > 0 ? safeAmount.toLocaleString('ko-KR') + '원' : null
+  const userText = amountFmt
+    ? `${contact.realName}에게 ${amountFmt} 보내줘`
+    : `${contact.realName}에게 송금해줘`
+  const aiText = amountFmt
+    ? `${contact.realName}님께 ${amountFmt} 이체하겠습니다.`
+    : `${contact.realName}님께 송금하겠습니다. 금액을 확인해 주세요.`
 
   res.json({
-    userText: `${contact.realName}에게 ${amountFmt} 보내줘`,
-    aiText: `${contact.realName}님께 ${amountFmt} 이체하겠습니다.`,
+    userText,
+    aiText,
     pendingTransfer: {
       to_contact: contact.realName,
-      amount,
+      amount: safeAmount,
       amountFormatted: amountFmt,
       from_account_id: checkingAcc.id,
       memo: '',
