@@ -160,7 +160,10 @@ function getSession(sessionId) {
       pendingTransfer: null,
       accounts: getInitialAccounts(),
       transactions: getInitialTransactions(),
-      aliasStore: new Map(),
+      aliasStore: new Map([
+        ['엄마', { realName: '김순자', bank: '농협은행', accountNo: '301-5678-9012-01', accountNoMasked: '****01' }],
+        ['아빠', { realName: '김기준', bank: '하나은행', accountNo: '130-789-012345',   accountNoMasked: '****45' }],
+      ]),
     })
   }
   return sessions.get(sessionId)
@@ -483,6 +486,14 @@ app.post('/api/enroll', (req, res) => {
     return res.status(409).json({ ok: false, error: '이미 가입되었거나 존재하지 않는 상품입니다.' })
   }
 
+  // 신용카드: 신청 접수 처리 (실계좌 생성 없음)
+  if (promoAcc.type === 'credit_card') {
+    session.accounts = session.accounts.filter((a) => a.id !== productId)
+    const appliedCard = { ...promoAcc, isPromo: false, status: 'pending_approval', applicationDate: new Date().toISOString().slice(0, 10) }
+    session.accounts.push(appliedCard)
+    return res.json({ ok: true, account: appliedCard })
+  }
+
   // 신규 계좌 생성
   const newAccount = createAccount(productId, enrollData)
   if (!newAccount) return res.status(400).json({ ok: false, error: '지원하지 않는 상품입니다.' })
@@ -705,7 +716,7 @@ app.post('/api/chat', async (req, res) => {
                 memo,
                 contactInfo: contact,
                 availableAccounts: session.accounts
-                  .filter((a) => a.type === '입출금' || a.type === 'CMA')
+                  .filter((a) => a.type === 'checking' || a.type === 'cma')
                   .map((a) => ({
                     id: a.id,
                     name: a.name,
@@ -817,7 +828,15 @@ app.get('/api/accounts', (req, res) => {
   const now = new Date()
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
 
-  const result = ctx.accounts.map((acc) => {
+  const enrichedAccounts = ctx.accounts.map((acc) => {
+    if ((acc.type === 'debit_card' || acc.type === 'credit_card') && acc.linkedAccountId) {
+      const linked = ctx.accounts.find((a) => a.id === acc.linkedAccountId)
+      return { ...acc, linkedAccountName: linked ? linked.name : null }
+    }
+    return acc
+  })
+
+  const result = enrichedAccounts.map((acc) => {
     const lastTx = ctx.transactions
       .filter((t) => t.accountId === acc.id)
       .sort((a, b) => b.date.localeCompare(a.date))[0] || null
@@ -921,7 +940,7 @@ app.get('/api/accounts', (req, res) => {
 // GET /api/account/:id — 계좌 상세 (잔액 + 거래 페이지네이션)
 // query: page (1-based, default 1), limit (default 20)
 // ──────────────────────────────────────────────
-app.get('/api/account/:id', (req, res) => {
+app.get('/api/account/:id', async (req, res) => {
   const sessionId = req.query.sessionId || 'default'
   const session = getSession(sessionId)
   const ctx = getSessionCtx(session)
@@ -932,6 +951,34 @@ app.get('/api/account/:id', (req, res) => {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1)
   const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20))
   const offset = (page - 1) * limit
+
+  // credit_card 계좌: cardTransactions(card002) 반환
+  if (acc.type === 'credit_card') {
+    const { cardTransactions } = await import('./mockData.js')
+    const cardId = 'card002'
+    const ctAll = cardTransactions
+      .filter((ct) => ct.cardId === cardId)
+      .sort((a, b) => b.date.localeCompare(a.date))
+
+    const slice = ctAll.slice(offset, offset + limit)
+    const txs = slice.map((ct) => ({
+      id: ct.id,
+      date: ct.date,
+      amount: ct.amount,
+      amountFormatted: (ct.amount > 0 ? '+' : '') + Math.abs(ct.amount).toLocaleString('ko-KR') + '원',
+      category: ct.inferredCategory,
+      counterpart: ct.merchant,
+      accountId: acc.id,
+      memo: ct.categoryNote || '',
+      source: 'card',
+    }))
+
+    return res.json({
+      account: acc,
+      recentTransactions: txs,
+      pagination: { page, limit, total: ctAll.length, hasMore: offset + limit < ctAll.length },
+    })
+  }
 
   const allTxs = ctx.transactions
     .filter((t) => t.accountId === acc.id)
@@ -1046,6 +1093,25 @@ function buildProductPitchData(acc, ctx) {
     compareCurrentLabel = '입출금 보관 (0.1%)'
   }
 
+  // 신용카드는 별도 데이터 구조
+  if (acc.type === 'credit_card') {
+    const ccProducts = PRODUCTS.credit_card || []
+    const ccProduct = ccProducts.find((p) => p.id === acc.promoProductId) || ccProducts[0]
+    return {
+      productId: acc.id,
+      product: {
+        id: ccProduct?.id,
+        name: ccProduct?.name || acc.name,
+        type: 'credit_card',
+        annualFee: ccProduct?.annualFee ?? 0,
+        benefits: ccProduct?.benefits || [],
+        highlights: (ccProduct?.highlights || []).slice(0, 4),
+        conditions: ccProduct?.conditions || '',
+        tags: (ccProduct?.tags || []).slice(0, 4),
+      },
+    }
+  }
+
   const productRate = product?.baseRate || 3.0
   return {
     productId: acc.id,
@@ -1082,8 +1148,8 @@ const ROOM_GREETING_PROMPTS = {
   term_deposit:        '정기예금 계좌 담당 AI로서 예금 만기/금리 관련해 신중하게 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
   savings:             '비상금 계좌 담당 AI로서 비상금 현황과 관련해 안심시키며 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
   cma:                 'CMA 계좌 담당 AI로서 수익률/운용 현황과 관련해 분석적으로 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
-  debit_card:          'iM 체크카드 담당 AI로서 최근 카드 사용 패턴(카페·쇼핑·식비 지출 등)을 바탕으로 소비 현황을 짧게 언급하며 먼저 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
-  credit_card:         'iM 신용카드 상품 안내 AI로서, 아직 신용카드가 없는 고객에게 iM 신용카드의 대표 혜택(적립·캐시백·할인)과 간단한 발급 방법을 친근하게 안내하라. 2-3문장. 이모지 금지. 격식체.',
+  debit_card:          '체크카드 AI 도우미로서, 이번달 카드 지출 현황을 간략히 언급하고, 현재 주계좌가 결제 계좌로 연결되어 있음을 자연스럽게 안내하라. 결제 계좌 변경이 필요할 경우 AI에게 말하면 된다고 유도하라. 2-3문장. 격식체. 이모지 금지.',
+  credit_card:         'iM 신용카드 AI 도우미로서, 이번달 신용카드 사용 내역을 간략히 언급하고 캐시백·할인 혜택 현황을 친근하게 안내하라. 2-3문장. 격식체. 이모지 금지.',
   promo_cma:          (bal) => `고객 주계좌 잔액이 ${bal}원입니다. CMA 안내 AI로서, 이 금액이 입출금에 방치될 때의 기회비용을 먼저 언급하고 CMA의 매일 이자 장점을 2문장 이내로 설명하라. 이모지 금지. 격식체.`,
   promo_term_deposit: (days, amt) => `고객 적금이 ${days}일 후 만기 예정이며 수령 예상액은 ${amt}원입니다. 정기예금 AI로서, 이 목돈을 정기예금에 넣으면 얼마나 더 불릴 수 있는지 2문장 이내로 안내하라. 이모지 금지. 격식체.`,
   promo_savings:      () => `비상금 통장 안내 AI로서, 예기치 못한 지출에 대비하는 비상금의 심리적 안도감을 먼저 공감하며 2문장 이내로 말을 걸어라. 이모지 금지. 격식체.`,
@@ -1180,7 +1246,7 @@ app.post('/api/room-greeting', async (req, res) => {
   try {
     const stream = anthropic.messages.stream({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 250,
       messages: [{ role: 'user', content: `${context}\n\n${prompt}` }],
     })
 
@@ -1212,9 +1278,77 @@ app.post('/api/room-greeting', async (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// GET /api/contacts — 연락처 목록 반환
+// ──────────────────────────────────────────────
+app.get('/api/contacts', (req, res) => {
+  res.json(contacts)
+})
+
+// ──────────────────────────────────────────────
+// POST /api/quick-transfer — 패널 즉시 이체 개시
+// WebSocket 미발송: 프론트가 응답 데이터로 직접 말풍선+TransferCard 주입
+// ──────────────────────────────────────────────
+app.post('/api/quick-transfer', (req, res) => {
+  const { sessionId = 'default', contactId, amount } = req.body
+
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ error: 'amount는 0보다 커야 합니다.' })
+  }
+
+  const contact = contacts.find((c) => c.id === contactId)
+  if (!contact) {
+    return res.status(404).json({ error: '연락처를 찾을 수 없습니다.' })
+  }
+
+  const session = getSession(sessionId)
+  const checkingAcc = session.accounts.find((a) => a.type === 'checking')
+  if (!checkingAcc) {
+    return res.status(400).json({ error: '입출금 계좌가 없습니다.' })
+  }
+
+  const pendingData = {
+    toolUseId: 'quick_' + Date.now(),
+    to_contact: contact.realName,
+    amount,
+    from_account_id: checkingAcc.id,
+    memo: '',
+    contactInfo: contact,
+  }
+  session.pendingTransfer = pendingData
+
+  const amountFmt = amount.toLocaleString('ko-KR') + '원'
+
+  res.json({
+    userText: `${contact.realName}에게 ${amountFmt} 보내줘`,
+    aiText: `${contact.realName}님께 ${amountFmt} 이체하겠습니다.`,
+    pendingTransfer: {
+      to_contact: contact.realName,
+      amount,
+      amountFormatted: amountFmt,
+      from_account_id: checkingAcc.id,
+      memo: '',
+      contactInfo: contact,
+      availableAccounts: session.accounts
+        .filter((a) => a.type === 'checking' || a.type === 'cma')
+        .map((a) => ({
+          id: a.id,
+          name: a.name,
+          balance: a.balance,
+          balanceFormatted: a.balance.toLocaleString('ko-KR') + '원',
+        })),
+      balance: checkingAcc.balance,
+    },
+  })
+})
+
+// ──────────────────────────────────────────────
 // 서버 시작
 // ──────────────────────────────────────────────
-const PORT = process.env.PORT || 3001
-httpServer.listen(PORT, () => {
-  console.log(`✅ 서버 실행 중: http://localhost:${PORT}`)
-})
+export { app }
+
+if (process.env.NODE_ENV !== 'test') {
+  const PORT = process.env.PORT || 3001
+  httpServer.listen(PORT, () => {
+    console.log(`✅ 서버 실행 중: http://localhost:${PORT}`)
+  })
+}

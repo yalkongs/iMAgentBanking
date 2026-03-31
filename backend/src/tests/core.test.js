@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, test, expect, beforeEach } from 'vitest'
+import request from 'supertest'
 import { getInitialAccounts, getInitialTransactions, createAccount } from '../mockData.js'
 import { handleToolCall } from '../tools.js'
+import { app } from '../server.js'
 
 // 테스트용 세션 ctx 팩토리
 function makeCtx() {
@@ -238,5 +240,46 @@ describe('createAccount', () => {
     expect(acc.id).toBe('savings_emg_001')
     expect(acc.type).toBe('savings')
     expect(acc.isPromo).toBeUndefined()
+  })
+})
+
+// ── Test 9: POST /api/quick-transfer ─────────────────────────────────────────
+describe('POST /api/quick-transfer', () => {
+  test('존재하는 contactId + 유효한 amount → pendingTransfer 세션 등록 + 응답 반환', async () => {
+    const res = await request(app)
+      .post('/api/quick-transfer')
+      .send({ sessionId: 'test-qt', contactId: 'c001', amount: 50000 })
+    expect(res.status).toBe(200)
+    expect(res.body.userText).toMatch('김영희')
+    expect(res.body.aiText).toMatch('50,000원')
+    expect(res.body.pendingTransfer.to_contact).toBe('김영희')
+    expect(res.body.pendingTransfer.amount).toBe(50000)
+    expect(Array.isArray(res.body.pendingTransfer.availableAccounts)).toBe(true)
+  })
+
+  test('존재하지 않는 contactId → 404', async () => {
+    const res = await request(app)
+      .post('/api/quick-transfer')
+      .send({ sessionId: 'test-qt', contactId: 'c999', amount: 50000 })
+    expect(res.status).toBe(404)
+  })
+
+  test('amount 미전달 → 400', async () => {
+    const res = await request(app)
+      .post('/api/quick-transfer')
+      .send({ sessionId: 'test-qt', contactId: 'c001' })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ── Test 10: GET /api/contacts ────────────────────────────────────────────────
+describe('GET /api/contacts', () => {
+  test('contacts 배열 반환', async () => {
+    const res = await request(app).get('/api/contacts')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+    expect(res.body[0]).toHaveProperty('realName')
+    expect(res.body[0]).toHaveProperty('bank')
+    expect(res.body[0]).toHaveProperty('accountNo')
   })
 })
