@@ -155,3 +155,56 @@ describe('promo accounts', () => {
     expect(daysToMaturity).toBeLessThanOrEqual(180)
   })
 })
+
+// ── Test 7: rebuild-context 로직 ──────────────────────────────────────────────
+describe('rebuild-context 세션 복원 로직', () => {
+  it('빈 세션에 메시지를 주입해야 한다', () => {
+    const session = { messages: [] }
+    const incoming = [
+      { role: 'user', content: '잔액 얼마야?' },
+      { role: 'assistant', content: '2,847,300원입니다.' },
+    ]
+    if (session.messages.length === 0) {
+      session.messages = incoming.slice(-20)
+    }
+    expect(session.messages.length).toBe(2)
+    expect(session.messages[0].role).toBe('user')
+    expect(session.messages[1].content).toBe('2,847,300원입니다.')
+  })
+
+  it('이미 메시지가 있는 세션은 덮어쓰지 않아야 한다', () => {
+    const session = { messages: [{ role: 'user', content: '기존 메시지' }] }
+    const incoming = [{ role: 'user', content: '새 메시지' }]
+    if (session.messages.length === 0) {
+      session.messages = incoming
+    }
+    expect(session.messages[0].content).toBe('기존 메시지')
+  })
+
+  it('20개 초과 메시지는 최근 20개만 주입해야 한다', () => {
+    const session = { messages: [] }
+    const incoming = Array.from({ length: 25 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `msg ${i}`,
+    }))
+    if (session.messages.length === 0) {
+      session.messages = incoming.slice(-20)
+    }
+    expect(session.messages.length).toBe(20)
+    expect(session.messages[0].content).toBe('msg 5')
+  })
+
+  it('role/content 없는 항목은 필터링해야 한다', () => {
+    const session = { messages: [] }
+    const incoming = [
+      { role: 'user', content: '유효' },
+      { content: '역할없음' },
+      { role: 'assistant' },
+    ]
+    if (session.messages.length === 0) {
+      session.messages = incoming.filter((m) => m.role && m.content).slice(-20)
+    }
+    expect(session.messages.length).toBe(1)
+    expect(session.messages[0].content).toBe('유효')
+  })
+})

@@ -456,6 +456,18 @@ app.get('/api/insights', async (req, res) => {
   }
 })
 
+// POST /api/rebuild-context — 페이지 리로드 후 서버 세션 컨텍스트 복원
+// ──────────────────────────────────────────────
+app.post('/api/rebuild-context', (req, res) => {
+  const { sessionId, messages } = req.body
+  if (!sessionId || !Array.isArray(messages)) return res.json({ ok: false })
+  const session = getSession(sessionId)
+  if (session.messages.length === 0) {
+    session.messages = messages.filter((m) => m.role && m.content).slice(-20)
+  }
+  res.json({ ok: true, rebuilt: session.messages.length })
+})
+
 // ──────────────────────────────────────────────
 // POST /api/reset-mock — 특정 세션 데이터 초기화
 // ──────────────────────────────────────────────
