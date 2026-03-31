@@ -2,7 +2,7 @@
 // 계좌 — iM뱅크 (입출금 + 예적금)
 // ──────────────────────────────────────────────
 export const accounts = [
-  // ── 실제 보유 계좌 ──
+  // ── 입출금 · 카드 ──
   {
     id: 'acc001',
     name: '주계좌',
@@ -10,18 +10,6 @@ export const accounts = [
     type: 'checking',
     bank: 'iM뱅크',
     accountNo: '503-12-3456789',
-  },
-  {
-    id: 'acc002',
-    name: 'iM 정기적금',
-    balance: 2100000,
-    type: 'installment_savings',
-    bank: 'iM뱅크',
-    accountNo: '503-34-5678901',
-    monthlyDeposit: 300000,
-    openDate: '2025-09-01',
-    maturityDate: '2026-09-01',
-    interestRate: 4.2,
   },
   {
     id: 'acc006',
@@ -42,6 +30,20 @@ export const accounts = [
     bank: 'iM뱅크',
     accountNo: null,
     isPromo: true,
+    promoHook: '적립·캐시백·할인 혜택을 한 장에',
+  },
+  // ── 저축 · 투자 ──
+  {
+    id: 'acc002',
+    name: 'iM 정기적금',
+    balance: 2100000,
+    type: 'installment_savings',
+    bank: 'iM뱅크',
+    accountNo: '503-34-5678901',
+    monthlyDeposit: 300000,
+    openDate: '2025-09-01',
+    maturityDate: '2026-09-01',
+    interestRate: 4.2,
   },
   // ── 미가입 상품 방 (isPromo) ──
   {
@@ -53,6 +55,7 @@ export const accounts = [
     accountNo: null,
     isPromo: true,
     promoProductId: 'cma_mmf_01',
+    promoHook: '잔액이 쉬는 동안 매일 이자 — 연 4.75%',
   },
   {
     id: 'promo_term_deposit',
@@ -63,6 +66,7 @@ export const accounts = [
     accountNo: null,
     isPromo: true,
     promoProductId: 'dep_001',
+    promoHook: '목돈을 안전하게, 연 4.20% 확정금리',
   },
   {
     id: 'promo_savings',
@@ -73,6 +77,7 @@ export const accounts = [
     accountNo: null,
     isPromo: true,
     promoProductId: 'dep_003',
+    promoHook: '언제든 출금 가능, 금리는 챙기고',
   },
 ]
 
