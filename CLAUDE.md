@@ -40,8 +40,9 @@ VITE_WS_URL=     # 백엔드 WebSocket URL (예: wss://xxx.railway.app/ws)
 ## Architecture
 
 ### Backend (`backend/src/`)
-- **`server.js`**: Express + WebSocket 서버. 모든 API 라우트, 세션 관리, 백그라운드 시뮬레이터, System Prompt 포함.
-- **`tools.js`**: Claude Tool Use 정의(`toolDefinitions`)와 각 툴 핸들러(`handleToolCall`). `aliasStore`(닉네임→실명 매핑)는 메모리 Map으로 관리.
+- **`server.js`**: Express + WebSocket 서버. 모든 API 라우트, 세션 관리, 백그라운드 시뮬레이터, System Prompt 포함. `UI_CARD_TOOLS` 배열로 카드 자동 라우팅 제어.
+- **`tools.js`**: Claude Tool Use 정의(`toolDefinitions`)와 각 툴 핸들러(`handleToolCall`). `aliasStore`(닉네임→실명 매핑)는 메모리 Map으로 세션별 관리.
+- **`products.js`**: iM뱅크 상품 DB. 예금/적금/대출/카드/IRP·ISA 총 20개 상품. `searchProducts({ type, keyword })`, `getProductById(id)` 함수 export.
 - **`mockData.js`**: 가상 계좌/거래/카드/연락처 데이터. `getInitialAccounts()` / `getInitialTransactions()`으로 리셋 가능.
 - **`tests/core.test.js`**: vitest 단위 테스트 (alertId 연결, 데이터 리셋, 후보 메시지 형식 검증).
 
@@ -64,22 +65,45 @@ VITE_WS_URL=     # 백엔드 WebSocket URL (예: wss://xxx.railway.app/ws)
 WebSocket 연결은 `sessionId` 쿼리 파라미터로 클라이언트와 1:1 매핑. `wsClients` Map에 저장.
 
 ### Frontend (`frontend/src/`)
-- **`App.jsx`**: 메인 컴포넌트. SSE 스트리밍 파싱, 메시지 상태, 데모 모드(자동 시나리오 재생) 관리.
+- **`App.jsx`**: 메인 컴포넌트. SSE 스트리밍 파싱, 메시지 상태, 데모 모드(자동 시나리오 재생), 음성 모드 관리.
 - **`hooks/useWebSocket.js`**: sessionId 기반 WebSocket 연결. 끊기면 3초 후 재연결.
 - **`hooks/useVoiceInput.js`**: MediaRecorder → `/api/whisper`로 Whisper STT.
-- **`components/Message.jsx`**: SSE 이벤트 타입에 따라 적절한 UI 카드 렌더링.
-- **`components/`**: `BalanceCard`, `SpendingCard`, `TransactionList`, `TransferCard`, `InsightCard`, `TransactionAlertCard`, `FinancialMomentCard`, `ContactCandidatesCard`, `TransferSuggestionCard`, `TransferReceiptCard`.
+- **`hooks/useVoiceConfirm.js`**: 음성 이체 확인 "네"/"아니오" 감지.
+- **`components/Message.jsx`**: SSE `cardType`에 따라 적절한 카드 컴포넌트로 디스패치. 새 카드 추가 시 여기에 매핑 추가.
+- **주요 카드 컴포넌트**: `BalanceCard`, `SpendingCard`, `TransactionList`, `TransferCard`, `InsightCard`, `TransactionAlertCard`, `FinancialMomentCard`, `FinancialStoryCard`, `SavingsInsightCard`, `ProductCompareCard`, `ProductListCard`, `ProductDetailCard`, `ContactCandidatesCard`, `TransferSuggestionCard`, `TransferReceiptCard`, `VoiceOverlay`.
 
 ### UI 카드 매핑
-`server.js`의 `UI_CARD_TOOLS` 배열에 포함된 툴은 결과가 자동으로 `{type:'ui_card'}` SSE 이벤트로 전송된다. `transfer`는 별도 `PENDING_TRANSFER` WebSocket 이벤트로 처리.
+`server.js`의 `UI_CARD_TOOLS` 배열에 포함된 툴은 결과가 자동으로 `{type:'ui_card', cardType, data}` SSE 이벤트로 전송된다. `transfer`는 별도 `PENDING_TRANSFER` WebSocket 이벤트로 처리. 새 툴을 카드로 렌더링하려면 `UI_CARD_TOOLS` 추가 → `Message.jsx` 매핑 추가 → 카드 컴포넌트 작성 3단계 필요.
+
+### Working Memory Model (GUI ↔ Chat 통합)
+`buildSystemPrompt(guiContext)` 함수가 현재 화면 상태를 `[CURRENT_VIEW]` 블록으로 System Prompt에 주입. 메시지 히스토리는 유지(장기 기억), System Prompt만 교체(작업 기억). GUI 드릴다운 탐색이 채팅 히스토리를 오염시키지 않도록 격리.
 
 ### 대화 아카이빙
 `BLOB_READ_WRITE_TOKEN` 환경변수가 있으면 `/api/chat` 요청마다 Vercel Blob에 `archive/{date}/{sessionId}/{timestamp}.json`으로 백그라운드 저장.
 
 ## Tool Use 정의 (tools.js)
-Claude가 호출 가능한 툴 목록: `get_balance`, `get_transactions`, `resolve_contact`, `save_alias`, `get_transfer_suggestion`, `transfer`, `analyze_spending`, `analyze_card_spending`, `get_card_transactions`.
+Claude가 호출 가능한 툴 목록 (총 13개):
+
+| 툴 | 용도 |
+|---|---|
+| `get_balance` | 계좌 잔액 조회 |
+| `get_transactions` | 거래내역 조회 |
+| `get_card_transactions` | 카드 거래내역 |
+| `analyze_spending` | 지출 분석 |
+| `analyze_card_spending` | 카드 지출 분석 |
+| `resolve_contact` | 연락처 이름→계좌 해석 |
+| `save_alias` | 닉네임 저장 |
+| `get_transfer_suggestion` | 이체 제안 |
+| `transfer` | 이체 실행 (인터셉트 방식) |
+| `complex_query` | 복합 자연어 쿼리 |
+| `get_monthly_story` | 월간 금융 스토리 |
+| `get_savings_advice` | 절약 조언 + 상품 비교 |
+| `search_products` | iM뱅크 상품 검색 (type: deposit/savings/loan/credit_card/debit_card/investment) |
+| `get_product_detail` | 상품 상세 조회 (product_id) |
 
 이체 전 resolve_contact → (필요시 save_alias) → get_transfer_suggestion → transfer 순서를 System Prompt에서 강제한다.
+
+상품 조회 시 search_products → get_product_detail 순서. System Prompt에 상품 타입별 검색 전략 포함.
 
 ## Deployment
 

@@ -392,6 +392,25 @@ export const PRODUCTS = {
       conditions: '만 19세 이상 (서민형: 소득 5,000만 원 이하 또는 농어민)',
       tags: ['ISA', '절세', '종합자산', '비과세'],
     },
+    {
+      id: 'cma_mmf_01',
+      name: 'iM CMA MMF형',
+      category: 'CMA',
+      baseRate: 4.75,
+      maxRate: 4.75,
+      period: '수시 입출금',
+      minAmount: 0,
+      maxAmount: null,
+      highlights: [
+        '연 4.75% (MMF 운용 기준, 변동 가능)',
+        '하루만 맡겨도 이자 발생 (매일 정산)',
+        '자유로운 입출금 · 이체 가능',
+        '증권 계좌 연계로 주식·펀드 투자 가능',
+      ],
+      conditions: '만 14세 이상 개인 고객',
+      earlyWithdrawal: '해당 없음 (수시 입출금)',
+      tags: ['CMA', '단기', '고금리', '자유입출금'],
+    },
   ],
 }
 

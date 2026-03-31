@@ -9,6 +9,7 @@ import OpenAI from 'openai'
 import { put } from '@vercel/blob'
 import { toolDefinitions, handleToolCall, executeTransfer, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
 import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts } from './mockData.js'
+import { PRODUCTS, getProductById } from './products.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -272,6 +273,62 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 - 상품 도구 결과는 UI 카드로 자동 표시되므로 내용을 텍스트로 반복하지 마세요.`
 
 // ──────────────────────────────────────────────
+// 계좌 타입별 대화 제약 컨텍스트
+// AI가 계좌 성격에 맞게 이체/해지 등 요청을 처리하도록 제약을 주입
+// ──────────────────────────────────────────────
+const ACCOUNT_TYPE_CONTEXTS = {
+  checking: {
+    constraints: [
+      '이 계좌는 자유입출금 통장입니다. 이체 출금·입금 모두 가능합니다.',
+      '잔액 조회, 거래내역, 지출 분석, 이체 실행 모두 지원합니다.',
+    ],
+  },
+  installment_savings: {
+    constraints: [
+      '이 계좌는 정기적금입니다. 외부 입금(이체받기)은 불가능합니다—납입은 자동이체로만 이루어집니다.',
+      '만기 전 중도해지 없이는 잔액 인출 및 이체 출금이 불가능합니다.',
+      '사용자가 이 계좌를 이체 대상(받는 계좌)으로 지정하거나 이 계좌로 송금하려 하면, 정기적금은 이체 대상이 될 수 없음을 안내하세요.',
+      '중도해지 시 약정이율 대신 중도해지이율(대폭 낮음)이 적용됩니다. 해지 요청 시 반드시 예상 손실액을 먼저 계산해 안내한 뒤 의향을 확인하세요.',
+    ],
+  },
+  term_deposit: {
+    constraints: [
+      '이 계좌는 정기예금입니다. 만기 전에는 원금 인출 및 이체 출금이 불가능합니다.',
+      '이 계좌로의 외부 이체 입금도 불가능합니다.',
+      '중도해지 시 약정이율보다 크게 낮은 중도해지이율이 적용됩니다. 해지 요청 시 예상 손실액을 먼저 안내하고 재확인을 받으세요.',
+      '만기 임박 시 재예치 여부 및 만기 후 자금 활용 방안을 먼저 제안하세요.',
+    ],
+  },
+  savings: {
+    constraints: [
+      '이 계좌는 비상금 통장(자유입출금 저축)으로 입출금 모두 가능합니다.',
+      '비상금 목적의 계좌임을 고려해 큰 금액 인출 시 한번 확인을 권고하세요.',
+    ],
+  },
+  cma: {
+    constraints: [
+      'CMA 계좌로 입출금이 자유롭고 일별 이자(MMF 운용 수익)가 자동 반영됩니다.',
+      '이체 출금·입금 모두 가능합니다.',
+      '수익률·누적 이자 안내 시 정확한 수치를 제공하세요.',
+    ],
+  },
+  debit_card: {
+    constraints: [
+      '이것은 체크카드입니다. 카드로 이체를 받거나 보내는 것은 불가능합니다.',
+      '이체가 필요하면 연결된 입출금 계좌를 사용하도록 안내하세요.',
+      '카드 사용 내역 조회와 지출 분석에 집중하세요.',
+    ],
+  },
+  credit_card: {
+    constraints: [
+      '이것은 아직 발급받지 않은 신용카드 상품 안내 화면입니다.',
+      '이 화면에서 이체나 계좌 잔액 조회는 불가능합니다.',
+      '신용카드 혜택, 발급 조건, 연회비, 포인트 적립 등 상품 안내에 집중하세요.',
+    ],
+  },
+}
+
+// ──────────────────────────────────────────────
 // CURRENT_VIEW 동적 System Prompt 빌더 (Model C)
 // GUI 상태를 System Prompt에 주입해 AI가 "지금 화면이 어딘지" 항상 인식하게 함
 // ──────────────────────────────────────────────
@@ -311,6 +368,17 @@ function buildSystemPrompt(guiContext) {
   if (topCategory) lines.push(`topSpendingCategory: ${topCategory}`)
   lines.push('[/CURRENT_VIEW]')
   lines.push('사용자가 "이거", "이 계좌", "여기", "지금 보는" 등 지시어를 쓰면 위 CURRENT_VIEW 정보를 기준으로 해석하세요.')
+
+  // 계좌 타입별 제약 주입
+  if (guiContext.accountType && ACCOUNT_TYPE_CONTEXTS[guiContext.accountType]) {
+    const typeCtx = ACCOUNT_TYPE_CONTEXTS[guiContext.accountType]
+    lines.push('')
+    lines.push('[ACCOUNT_CONSTRAINTS]')
+    typeCtx.constraints.forEach((c) => lines.push(`- ${c}`))
+    lines.push('[/ACCOUNT_CONSTRAINTS]')
+    lines.push('위 ACCOUNT_CONSTRAINTS는 이 계좌 대화방에서 반드시 지켜야 할 제약입니다. 사용자 요청이 제약에 위배되면 친절하게 이유를 설명하고 가능한 대안을 제시하세요.')
+  }
+
   return SYSTEM_PROMPT + lines.join('\n')
 }
 
@@ -853,6 +921,85 @@ app.get('/api/health-score', (req, res) => {
 })
 
 // ──────────────────────────────────────────────
+// 상품 방 — 개인화 피치 데이터 빌더
+// ──────────────────────────────────────────────
+function buildProductPitchData(acc, ctx) {
+  const allProducts = [
+    ...(PRODUCTS.deposit || []),
+    ...(PRODUCTS.investment || []),
+  ]
+  const product = allProducts.find((p) => p.id === acc.promoProductId) || null
+
+  const checkingAcc = ctx.accounts.find((a) => a.type === 'checking' && !a.isPromo)
+  const installAcc  = ctx.accounts.find((a) => a.type === 'installment_savings' && !a.isPromo)
+
+  let personal = { baseAmount: 0, annualGain: 0, dailyGain: null, label: '' }
+  let compareCurrentRate = 0.1
+  let compareCurrentLabel = '현재 입출금'
+
+  if (acc.type === 'cma') {
+    const base = checkingAcc?.balance || 1000000
+    personal = {
+      baseAmount: base,
+      dailyGain: Math.round(base * 0.0475 / 365),
+      annualGain: Math.round(base * 0.0475),
+      label: '주계좌 잔액 기준',
+    }
+    compareCurrentRate = 0.1
+    compareCurrentLabel = '현재 입출금 (0.1%)'
+  } else if (acc.type === 'term_deposit') {
+    if (installAcc && installAcc.maturityDate) {
+      const daysLeft = Math.max(0, Math.ceil((new Date(installAcc.maturityDate) - new Date()) / 86400000))
+      const projected = installAcc.balance + (installAcc.monthlyDeposit || 0) * Math.ceil(daysLeft / 30)
+      personal = {
+        baseAmount: projected,
+        annualGain: Math.round(projected * (product?.baseRate || 3.2) / 100),
+        dailyGain: null,
+        label: '적금 만기 수령 예상액 기준',
+      }
+    } else {
+      personal = { baseAmount: 10000000, annualGain: Math.round(10000000 * (product?.baseRate || 3.2) / 100), dailyGain: null, label: '1,000만원 기준' }
+    }
+    compareCurrentRate = 0.1
+    compareCurrentLabel = '입출금 보관 (0.1%)'
+  } else if (acc.type === 'savings') {
+    personal = {
+      baseAmount: 3000000,
+      annualGain: Math.round(3000000 * (product?.baseRate || 2.5) / 100),
+      dailyGain: null,
+      label: '3개월 생활비 기준 권장액',
+    }
+    compareCurrentRate = 0.1
+    compareCurrentLabel = '입출금 보관 (0.1%)'
+  }
+
+  const productRate = product?.baseRate || 3.0
+  return {
+    product: {
+      id: product?.id,
+      name: product?.name || acc.name,
+      type: acc.type,
+      interestRate: productRate,
+      highlights: (product?.highlights || []).slice(0, 3),
+      earlyWithdrawal: product?.earlyWithdrawal || '',
+    },
+    personal,
+    compare: {
+      current: {
+        label: compareCurrentLabel,
+        rate: compareCurrentRate,
+        annualGain: Math.round(personal.baseAmount * compareCurrentRate / 100),
+      },
+      withProduct: {
+        label: product?.name || acc.name,
+        rate: productRate,
+        annualGain: personal.annualGain,
+      },
+    },
+  }
+}
+
+// ──────────────────────────────────────────────
 // POST /api/room-greeting — 계좌방 첫 입장 AI 인사말 (SSE)
 // ──────────────────────────────────────────────
 const ROOM_GREETING_PROMPTS = {
@@ -863,6 +1010,9 @@ const ROOM_GREETING_PROMPTS = {
   cma:                 'CMA 계좌 담당 AI로서 수익률/운용 현황과 관련해 분석적으로 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
   debit_card:          'iM 체크카드 담당 AI로서 최근 카드 사용 패턴(카페·쇼핑·식비 지출 등)을 바탕으로 소비 현황을 짧게 언급하며 먼저 말을 걸어라. 1-2문장. 이모지 금지. 격식체.',
   credit_card:         'iM 신용카드 상품 안내 AI로서, 아직 신용카드가 없는 고객에게 iM 신용카드의 대표 혜택(적립·캐시백·할인)과 간단한 발급 방법을 친근하게 안내하라. 2-3문장. 이모지 금지. 격식체.',
+  promo_cma:          (bal) => `고객 주계좌 잔액이 ${bal}원입니다. CMA 안내 AI로서, 이 금액이 입출금에 방치될 때의 기회비용을 먼저 언급하고 CMA의 매일 이자 장점을 2문장 이내로 설명하라. 이모지 금지. 격식체.`,
+  promo_term_deposit: (days, amt) => `고객 적금이 ${days}일 후 만기 예정이며 수령 예상액은 ${amt}원입니다. 정기예금 AI로서, 이 목돈을 정기예금에 넣으면 얼마나 더 불릴 수 있는지 2문장 이내로 안내하라. 이모지 금지. 격식체.`,
+  promo_savings:      () => `비상금 통장 안내 AI로서, 예기치 못한 지출에 대비하는 비상금의 심리적 안도감을 먼저 공감하며 2문장 이내로 말을 걸어라. 이모지 금지. 격식체.`,
 }
 
 app.post('/api/room-greeting', async (req, res) => {
@@ -873,47 +1023,79 @@ app.post('/api/room-greeting', async (req, res) => {
   const acc = ctx.accounts.find((a) => a.id === accountId)
   if (!acc) return res.status(404).json({ error: '계좌를 찾을 수 없습니다.' })
 
-  const recentTxs = ctx.transactions
-    .filter((t) => t.accountId === acc.id)
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 3)
-    .map((t) => `${t.counterpart} ${(t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR')}원`)
-    .join(', ')
+  let prompt
+  let context
 
-  let prompt = ROOM_GREETING_PROMPTS[acc.type] || ROOM_GREETING_PROMPTS.checking
-  let context = `계좌명: ${acc.name}, 잔액: ${acc.balance.toLocaleString('ko-KR')}원${recentTxs ? `, 최근 거래: ${recentTxs}` : ''}`
+  if (acc.isPromo) {
+    // 프로모 계좌: 상품 안내 전용 프롬프트
+    const checkingAcc = ctx.accounts.find((a) => a.type === 'checking' && !a.isPromo)
+    const installAcc  = ctx.accounts.find((a) => a.type === 'installment_savings' && !a.isPromo)
 
-  // ② 만기 임박 (30일 이하): 재예치/재투자 행동 유도
-  if (acc.maturityDate && (acc.type === 'installment_savings' || acc.type === 'term_deposit')) {
-    const greetNow = new Date()
-    const daysLeft = Math.max(0, Math.ceil((new Date(acc.maturityDate) - greetNow) / 86400000))
-    if (daysLeft <= 30 && daysLeft > 0) {
-      const typeLabel = acc.type === 'installment_savings' ? '정기적금' : '정기예금'
-      prompt = `${typeLabel}이 ${daysLeft}일 후 만기됩니다. 만기 수령금 활용 방안(재예치·운용·목돈 계획)에 대해 AI 매니저로서 먼저 물어보며 조언을 제안하라. 2문장 이내. 이모지 금지. 격식체.`
-      context += `, 만기까지: ${daysLeft}일`
+    if (acc.type === 'cma') {
+      const bal = (checkingAcc?.balance || 0).toLocaleString('ko-KR')
+      prompt = ROOM_GREETING_PROMPTS.promo_cma(bal)
+      context = 'CMA 상품 안내'
+    } else if (acc.type === 'term_deposit') {
+      const daysLeft = installAcc?.maturityDate
+        ? Math.max(0, Math.ceil((new Date(installAcc.maturityDate) - new Date()) / 86400000))
+        : 0
+      const projected = installAcc
+        ? (installAcc.balance + (installAcc.monthlyDeposit || 0) * Math.ceil(daysLeft / 30)).toLocaleString('ko-KR')
+        : '0'
+      prompt = ROOM_GREETING_PROMPTS.promo_term_deposit(daysLeft, projected)
+      context = '정기예금 상품 안내'
+    } else if (acc.type === 'savings') {
+      prompt = ROOM_GREETING_PROMPTS.promo_savings()
+      context = '비상금통장 상품 안내'
+    } else {
+      // credit_card 등 기존 isPromo
+      prompt = ROOM_GREETING_PROMPTS.credit_card
+      context = `계좌명: ${acc.name}`
     }
-  }
+  } else {
+    // 기존 보유 계좌 로직 — 변경 없음
+    const recentTxs = ctx.transactions
+      .filter((t) => t.accountId === acc.id)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3)
+      .map((t) => `${t.counterpart} ${(t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR')}원`)
+      .join(', ')
 
-  // ④ 입출금 계좌 월간 리포트 (월초 1-5일: 지난달 정산 / 월말 25일~: 이달 마감 리포트)
-  if (acc.type === 'checking') {
-    const dayOfMonth = new Date().getDate()
-    const txNow = ctx.transactions.filter((t) => t.accountId === acc.id)
-    if (dayOfMonth <= 5) {
-      const prev = new Date(); prev.setMonth(prev.getMonth() - 1)
-      const prevStart = new Date(prev.getFullYear(), prev.getMonth(), 1).toISOString().slice(0, 10)
-      const prevEnd = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).toISOString().slice(0, 10)
-      const prevTxs = txNow.filter((t) => t.date >= prevStart && t.date <= prevEnd)
-      const income = prevTxs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
-      const expense = Math.abs(prevTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
-      const net = income - expense
-      context += `, 지난달 입금 ${income.toLocaleString('ko-KR')}원, 지출 ${expense.toLocaleString('ko-KR')}원, 순저축 ${net.toLocaleString('ko-KR')}원`
-      prompt = '새 달이 시작됐습니다. 지난 달 재정 요약(입금·지출·순저축)을 바탕으로 이번 달을 응원하며 간결하게 리포트하라. 2문장. 이모지 금지. 격식체.'
-    } else if (dayOfMonth >= 25) {
-      const thisStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-      const thisTxs = txNow.filter((t) => t.date >= thisStart)
-      const thisExpense = Math.abs(thisTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
-      context += `, 이번달 지출 ${thisExpense.toLocaleString('ko-KR')}원`
-      prompt = '월말이 다가옵니다. 이번 달 지출 현황과 잔액을 언급하며 월말 재정 정리를 돕겠다고 먼저 말을 걸어라. 2문장. 이모지 금지. 격식체.'
+    prompt = ROOM_GREETING_PROMPTS[acc.type] || ROOM_GREETING_PROMPTS.checking
+    context = `계좌명: ${acc.name}, 잔액: ${acc.balance.toLocaleString('ko-KR')}원${recentTxs ? `, 최근 거래: ${recentTxs}` : ''}`
+
+    // 만기 임박 로직 (기존 그대로)
+    if (acc.maturityDate && (acc.type === 'installment_savings' || acc.type === 'term_deposit')) {
+      const greetNow = new Date()
+      const daysLeft = Math.max(0, Math.ceil((new Date(acc.maturityDate) - greetNow) / 86400000))
+      if (daysLeft <= 30 && daysLeft > 0) {
+        const typeLabel = acc.type === 'installment_savings' ? '정기적금' : '정기예금'
+        prompt = `${typeLabel}이 ${daysLeft}일 후 만기됩니다. 만기 수령금 활용 방안(재예치·운용·목돈 계획)에 대해 AI 매니저로서 먼저 물어보며 조언을 제안하라. 2문장 이내. 이모지 금지. 격식체.`
+        context += `, 만기까지: ${daysLeft}일`
+      }
+    }
+
+    // 입출금 계좌 월간 리포트 (기존 그대로)
+    if (acc.type === 'checking') {
+      const dayOfMonth = new Date().getDate()
+      const txNow = ctx.transactions.filter((t) => t.accountId === acc.id)
+      if (dayOfMonth <= 5) {
+        const prev = new Date(); prev.setMonth(prev.getMonth() - 1)
+        const prevStart = new Date(prev.getFullYear(), prev.getMonth(), 1).toISOString().slice(0, 10)
+        const prevEnd = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).toISOString().slice(0, 10)
+        const prevTxs = txNow.filter((t) => t.date >= prevStart && t.date <= prevEnd)
+        const income = prevTxs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
+        const expense = Math.abs(prevTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+        const net = income - expense
+        context += `, 지난달 입금 ${income.toLocaleString('ko-KR')}원, 지출 ${expense.toLocaleString('ko-KR')}원, 순저축 ${net.toLocaleString('ko-KR')}원`
+        prompt = '새 달이 시작됐습니다. 지난 달 재정 요약(입금·지출·순저축)을 바탕으로 이번 달을 응원하며 간결하게 리포트하라. 2문장. 이모지 금지. 격식체.'
+      } else if (dayOfMonth >= 25) {
+        const thisStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+        const thisTxs = txNow.filter((t) => t.date >= thisStart)
+        const thisExpense = Math.abs(thisTxs.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0))
+        context += `, 이번달 지출 ${thisExpense.toLocaleString('ko-KR')}원`
+        prompt = '월말이 다가옵니다. 이번 달 지출 현황과 잔액을 언급하며 월말 재정 정리를 돕겠다고 먼저 말을 걸어라. 2문장. 이모지 금지. 격식체.'
+      }
     }
   }
 
@@ -928,11 +1110,25 @@ app.post('/api/room-greeting', async (req, res) => {
       messages: [{ role: 'user', content: `${context}\n\n${prompt}` }],
     })
 
+    let fullText = ''
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        fullText += event.delta.text
         res.write(`data: ${JSON.stringify({ type: 'text', delta: event.delta.text })}\n\n`)
       }
     }
+
+    // 인사말을 session.messages에 저장 → 이후 "응" 같은 짧은 답변에도 맥락 유지
+    if (fullText) {
+      session.messages.push({ role: 'assistant', content: fullText })
+    }
+
+    // 프로모 계좌이면 product_pitch 카드 추가 발송
+    if (acc.isPromo) {
+      const pitchData = buildProductPitchData(acc, ctx)
+      res.write(`data: ${JSON.stringify({ type: 'ui_card', cardType: 'product_pitch', data: pitchData })}\n\n`)
+    }
+
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)
   } catch {
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`)

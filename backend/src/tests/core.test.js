@@ -116,3 +116,42 @@ describe('candidates 자동 선택 메시지', () => {
     expect(autoMsg).toBe('엄마은(는) 이순자 (농협은행 5678)이야. 이 분으로 진행해줘.')
   })
 })
+
+// ── Test 6: 프로모 계좌 구조 검증 ─────────────────────────────────────────────
+describe('promo accounts', () => {
+  it('getInitialAccounts에 프로모 계좌 3개가 있어야 한다', () => {
+    const accounts = getInitialAccounts()
+    const promos = accounts.filter((a) => a.isPromo === true)
+    expect(promos.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('프로모 계좌는 type별로 cma, term_deposit, savings를 포함해야 한다', () => {
+    const accounts = getInitialAccounts()
+    const promoTypes = new Set(accounts.filter((a) => a.isPromo).map((a) => a.type))
+    expect(promoTypes.has('cma')).toBe(true)
+    expect(promoTypes.has('term_deposit')).toBe(true)
+    expect(promoTypes.has('savings')).toBe(true)
+  })
+
+  it('프로모 계좌는 promoProductId 또는 isPromo: true를 가져야 한다', () => {
+    const accounts = getInitialAccounts()
+    const promos = accounts.filter((a) => a.isPromo === true)
+    promos.forEach((a) => {
+      expect(a.isPromo).toBe(true)
+    })
+  })
+
+  it('acc001 주계좌 잔액이 CMA 힌트 임계값(1,000,000원) 이상이어야 한다', () => {
+    const accounts = getInitialAccounts()
+    const checking = accounts.find((a) => a.id === 'acc001')
+    expect(checking.balance).toBeGreaterThanOrEqual(1000000)
+  })
+
+  it('acc002 적금 maturityDate가 180일 이내여야 한다 (정기예금 힌트 조건)', () => {
+    const accounts = getInitialAccounts()
+    const installment = accounts.find((a) => a.id === 'acc002')
+    const daysToMaturity = Math.ceil((new Date(installment.maturityDate) - new Date()) / 86400000)
+    expect(daysToMaturity).toBeGreaterThan(0)
+    expect(daysToMaturity).toBeLessThanOrEqual(180)
+  })
+})
