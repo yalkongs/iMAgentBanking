@@ -772,11 +772,15 @@ app.post('/api/reset', (req, res) => {
 // GET /api/health-score — 금융 건강도 점수
 // ──────────────────────────────────────────────
 app.get('/api/health-score', (req, res) => {
+  const sessionId = req.query.sessionId || 'default'
+  const session = getSession(sessionId)
+  const ctx = getSessionCtx(session)
+
   // 이번 달 거래 집계
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
-  const monthTxs = transactions.filter((t) => {
+  const monthTxs = ctx.transactions.filter((t) => {
     const d = new Date(t.date)
     return d.getFullYear() === year && d.getMonth() + 1 === month
   })
@@ -785,7 +789,7 @@ app.get('/api/health-score', (req, res) => {
   const savingsRate = income > 0 ? (income - expense) / income : 0
 
   // 전체 자산 대비 부채 (단순화: 없으므로 0)
-  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0)
+  const totalBalance = ctx.accounts.reduce((s, a) => s + a.balance, 0)
 
   // 점수 계산 (0-100)
   let score = 50
