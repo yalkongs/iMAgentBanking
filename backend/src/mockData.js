@@ -625,3 +625,59 @@ export const savingsProducts = [
     recommended: false,
   },
 ]
+
+// ──────────────────────────────────────────────
+// 신규 계좌 생성 (상품 가입)
+// ──────────────────────────────────────────────
+export function createAccount(productId, enrollData = {}) {
+  const now = new Date()
+  const accountNo = () =>
+    '503-' + String(Math.floor(Math.random() * 90) + 10) + '-' + String(Math.floor(Math.random() * 9000000) + 1000000)
+
+  if (productId === 'promo_cma') {
+    return {
+      id: 'cma_001',
+      name: 'iM CMA',
+      balance: 0,
+      type: 'cma',
+      bank: 'iM뱅크증권',
+      accountNo: accountNo(),
+      interestRate: 4.75,
+      openDate: now.toISOString().slice(0, 10),
+    }
+  }
+
+  if (productId === 'promo_term_deposit') {
+    const maturityDate = new Date(now)
+    maturityDate.setMonth(maturityDate.getMonth() + (enrollData.term || 12))
+    return {
+      id: 'term_001',
+      name: 'iM 정기예금',
+      balance: 0,
+      type: 'term_deposit',
+      bank: 'iM뱅크',
+      accountNo: accountNo(),
+      interestRate: 4.20,
+      openDate: now.toISOString().slice(0, 10),
+      maturityDate: maturityDate.toISOString().slice(0, 10),
+      term: enrollData.term || 12,
+      maturityAction: enrollData.maturityAction || 'withdraw',
+    }
+  }
+
+  if (productId === 'promo_savings') {
+    return {
+      id: 'savings_emg_001',
+      name: 'iM 비상금통장',
+      balance: 0,
+      type: 'savings',
+      bank: 'iM뱅크',
+      accountNo: accountNo(),
+      interestRate: 2.10,
+      openDate: now.toISOString().slice(0, 10),
+      tag: 'emergency',
+    }
+  }
+
+  return null
+}

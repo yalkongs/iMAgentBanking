@@ -8,7 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { put } from '@vercel/blob'
 import { toolDefinitions, handleToolCall, executeTransfer, handleAnalyzeSpending, handleAnalyzeCardSpending } from './tools.js'
-import { getProactiveAlert, getInitialAccounts, getInitialTransactions, contacts } from './mockData.js'
+import { getProactiveAlert, getInitialAccounts, getInitialTransactions, createAccount, contacts } from './mockData.js'
 import { PRODUCTS, getProductById } from './products.js'
 
 const app = express()
@@ -466,6 +466,67 @@ app.post('/api/rebuild-context', (req, res) => {
     session.messages = messages.filter((m) => m.role && m.content).slice(-20)
   }
   res.json({ ok: true, rebuilt: session.messages.length })
+})
+
+// ──────────────────────────────────────────────
+// POST /api/enroll — 상품 가입 확정
+// ──────────────────────────────────────────────
+app.post('/api/enroll', (req, res) => {
+  const { sessionId = 'default', productId, enrollData = {} } = req.body
+  if (!productId) return res.status(400).json({ ok: false, error: 'productId required' })
+
+  const session = getSession(sessionId)
+
+  // 프로모 계좌 확인 (미가입 상품만 가입 가능)
+  const promoAcc = session.accounts.find((a) => a.id === productId && a.isPromo)
+  if (!promoAcc) {
+    return res.status(409).json({ ok: false, error: '이미 가입되었거나 존재하지 않는 상품입니다.' })
+  }
+
+  // 신규 계좌 생성
+  const newAccount = createAccount(productId, enrollData)
+  if (!newAccount) return res.status(400).json({ ok: false, error: '지원하지 않는 상품입니다.' })
+
+  // 입금 처리 (amount > 0인 경우)
+  const amount = Number(enrollData.amount) || 0
+  if (amount > 0 && enrollData.fromAccountId) {
+    const fromAcc = session.accounts.find((a) => a.id === enrollData.fromAccountId)
+    if (!fromAcc) {
+      return res.status(400).json({ ok: false, error: '출금 계좌를 찾을 수 없습니다.' })
+    }
+    if (fromAcc.balance < amount) {
+      return res.status(400).json({ ok: false, error: '잔액이 부족합니다.' })
+    }
+    fromAcc.balance -= amount
+    newAccount.balance = amount
+
+    // 거래내역 기록
+    const txId = 'tx_enroll_' + Date.now()
+    session.transactions.unshift({
+      id: txId,
+      date: new Date().toISOString().slice(0, 10),
+      amount: -amount,
+      category: '이체',
+      counterpart: newAccount.name,
+      accountId: enrollData.fromAccountId,
+      source: 'account',
+    })
+    session.transactions.unshift({
+      id: txId + '_in',
+      date: new Date().toISOString().slice(0, 10),
+      amount: amount,
+      category: '입금',
+      counterpart: fromAcc.name,
+      accountId: newAccount.id,
+      source: 'account',
+    })
+  }
+
+  // 프로모 계좌 제거 + 신규 계좌 추가
+  session.accounts = session.accounts.filter((a) => a.id !== productId)
+  session.accounts.push(newAccount)
+
+  res.json({ ok: true, account: newAccount })
 })
 
 // ──────────────────────────────────────────────
@@ -987,6 +1048,7 @@ function buildProductPitchData(acc, ctx) {
 
   const productRate = product?.baseRate || 3.0
   return {
+    productId: acc.id,
     product: {
       id: product?.id,
       name: product?.name || acc.name,

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { getInitialAccounts, getInitialTransactions } from '../mockData.js'
+import { getInitialAccounts, getInitialTransactions, createAccount } from '../mockData.js'
 import { handleToolCall } from '../tools.js'
 
 // 테스트용 세션 ctx 팩토리
@@ -206,5 +206,37 @@ describe('rebuild-context 세션 복원 로직', () => {
     }
     expect(session.messages.length).toBe(1)
     expect(session.messages[0].content).toBe('유효')
+  })
+})
+
+// ── Test 8: createAccount ─────────────────────────────────────────────────────
+describe('createAccount', () => {
+  it('promo_cma → id:cma_001, type:cma, interestRate:4.75', () => {
+    const acc = createAccount('promo_cma', { amount: 500000, fromAccountId: 'acc001' })
+    expect(acc.id).toBe('cma_001')
+    expect(acc.type).toBe('cma')
+    expect(acc.isPromo).toBeUndefined()
+    expect(acc.interestRate).toBe(4.75)
+    expect(acc.accountNo).toBeTruthy()
+  })
+
+  it('promo_term_deposit → type:term_deposit, maturityDate가 term개월 후', () => {
+    const acc = createAccount('promo_term_deposit', {
+      amount: 1000000, fromAccountId: 'acc001', term: 12, maturityAction: 'reinvest',
+    })
+    expect(acc.type).toBe('term_deposit')
+    expect(acc.term).toBe(12)
+    expect(acc.maturityAction).toBe('reinvest')
+    const diffMonths =
+      (new Date(acc.maturityDate).getFullYear() - new Date().getFullYear()) * 12 +
+      (new Date(acc.maturityDate).getMonth() - new Date().getMonth())
+    expect(diffMonths).toBe(12)
+  })
+
+  it('promo_savings → id:savings_emg_001, type:savings', () => {
+    const acc = createAccount('promo_savings', { amount: 0 })
+    expect(acc.id).toBe('savings_emg_001')
+    expect(acc.type).toBe('savings')
+    expect(acc.isPromo).toBeUndefined()
   })
 })
