@@ -32,10 +32,10 @@ export const accounts = [
     cardNo: null,
     last4: null,
     linkedAccountId: 'acc001',
+    isPromo: true,
+    promoHook: '국내외 최대 1.5% 캐시백 · 첫 해 연회비 무료',
     creditLimit: 3000000,
     billingDate: 15,
-    applicationStatus: 'pending',
-    applicationDate: '2026-03-28',
   },
   {
     id: 'acc008',

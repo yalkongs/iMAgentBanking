@@ -555,10 +555,16 @@ app.post('/api/enroll', (req, res) => {
     return res.status(409).json({ ok: false, error: '이미 가입되었거나 존재하지 않는 상품입니다.' })
   }
 
-  // 신용카드: 신청 접수 처리 (실계좌 생성 없음)
+  // 신용카드: 신청 접수 처리 (실계좌 생성 없음, 심사 대기 상태로 전환)
   if (promoAcc.type === 'credit_card') {
     session.accounts = session.accounts.filter((a) => a.id !== productId)
-    const appliedCard = { ...promoAcc, isPromo: false, status: 'pending_approval', applicationDate: new Date().toISOString().slice(0, 10) }
+    const appliedCard = {
+      ...promoAcc,
+      isPromo: false,
+      applicationStatus: 'pending',
+      applicationDate: new Date().toISOString().slice(0, 10),
+    }
+    delete appliedCard.promoHook
     session.accounts.push(appliedCard)
     return res.json({ ok: true, account: appliedCard })
   }
@@ -1266,9 +1272,12 @@ app.post('/api/room-greeting', async (req, res) => {
     } else if (acc.type === 'savings') {
       prompt = ROOM_GREETING_PROMPTS.promo_savings()
       context = '비상금통장 상품 안내'
+    } else if (acc.type === 'credit_card') {
+      // 신용카드 프로모: 상품 혜택 소개 + 신청 유도
+      prompt = 'iM 신용카드 안내 AI로서, 국내외 최대 1.5% 캐시백과 스타벅스·편의점 10% 즉시 할인 등 핵심 혜택을 2문장 이내로 소개하고, 카드 발급에 관심이 있으면 말해달라고 자연스럽게 유도하라. 이모지 금지. 격식체.'
+      context = 'iM 신용카드 상품 안내 · 첫 해 연회비 무료'
     } else {
-      // credit_card 등 기존 isPromo
-      prompt = ROOM_GREETING_PROMPTS.credit_card
+      prompt = ROOM_GREETING_PROMPTS[acc.type] || ROOM_GREETING_PROMPTS.checking
       context = `계좌명: ${acc.name}`
     }
   } else {
