@@ -72,7 +72,10 @@ setInterval(async () => {
   // 1. 먼저 코멘트 없이 알림 전송
   broadcastWsEvent({ type: 'TRANSACTION_ALERT', data: alertData })
 
-  // 2. Claude 비동기 코멘트 생성 (2500ms timeout)
+  // 2. TYPING_START — AI 코멘트 생성 시작 알림
+  broadcastWsEvent({ type: 'TYPING_START', data: { accountId: tx.accountId } })
+
+  // 3. Claude 비동기 코멘트 생성 (2500ms timeout)
   const txDesc = `${tx.amount > 0 ? '입금' : '출금'}: ${tx.counterpart}, ${Math.abs(tx.amount).toLocaleString('ko-KR')}원, 카테고리: ${tx.category}`
   try {
     const commentRes = await Promise.race([
@@ -92,6 +95,9 @@ setInterval(async () => {
     }
   } catch {
     // timeout or error — 코멘트 없이 표시 (이미 알림은 전송됨)
+  } finally {
+    // 4. TYPING_END — 성공/실패 무관하게 항상 전송
+    broadcastWsEvent({ type: 'TYPING_END', data: { accountId: tx.accountId } })
   }
 }, 90000) // 90초마다 (1회/분 이하)
 
@@ -158,6 +164,7 @@ function getSession(sessionId) {
     sessions.set(sessionId, {
       messages: [],
       pendingTransfer: null,
+      lastConfirmedTransferId: null,  // #7 멱등성: 마지막 처리된 이체 ID
       accounts: getInitialAccounts(),
       transactions: getInitialTransactions(),
       aliasStore: new Map([
@@ -171,6 +178,30 @@ function getSession(sessionId) {
 
 function getSessionCtx(session) {
   return { accounts: session.accounts, transactions: session.transactions, aliasStore: session.aliasStore }
+}
+
+// ── 타 계좌 크로스 컨텍스트 빌더 (acc001/acc008/card001 간) ──
+function getCrossAccountSummary(session, currentAccountId) {
+  const TARGET_IDS = ['acc001', 'acc008', 'card001']
+  const others = session.accounts.filter(
+    (a) => TARGET_IDS.includes(a.id) && a.id !== currentAccountId
+  )
+  if (others.length === 0) return ''
+  const LABELS = { acc001: '주계좌', acc008: '급여계좌', card001: '체크카드' }
+  const lines = ['', '[OTHER_ACCOUNTS]']
+  for (const acc of others) {
+    const label = LABELS[acc.id] || acc.name
+    const recentTxs = session.transactions
+      .filter((t) => t.accountId === acc.id)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3)
+      .map((t) => `${t.counterpart} ${(t.amount > 0 ? '+' : '') + t.amount.toLocaleString('ko-KR')}원`)
+      .join(', ')
+    lines.push(`${label}(${acc.id}): 잔액 ${acc.balance.toLocaleString('ko-KR')}원${recentTxs ? `, 최근거래: ${recentTxs}` : ''}`)
+  }
+  lines.push('[/OTHER_ACCOUNTS]')
+  lines.push('위 OTHER_ACCOUNTS는 같은 고객의 다른 계좌 현황입니다. 사용자가 "다른 계좌", "주계좌", "급여계좌", "체크카드" 등을 언급하면 이 정보를 참고하세요.')
+  return lines.join('\n')
 }
 
 // ──────────────────────────────────────────────
@@ -335,7 +366,7 @@ const ACCOUNT_TYPE_CONTEXTS = {
 // CURRENT_VIEW 동적 System Prompt 빌더 (Model C)
 // GUI 상태를 System Prompt에 주입해 AI가 "지금 화면이 어딘지" 항상 인식하게 함
 // ──────────────────────────────────────────────
-function buildSystemPrompt(guiContext) {
+function buildSystemPrompt(guiContext, session) {
   if (!guiContext) return SYSTEM_PROMPT
   const lines = ['', '[CURRENT_VIEW]']
   const {
@@ -380,6 +411,25 @@ function buildSystemPrompt(guiContext) {
     typeCtx.constraints.forEach((c) => lines.push(`- ${c}`))
     lines.push('[/ACCOUNT_CONSTRAINTS]')
     lines.push('위 ACCOUNT_CONSTRAINTS는 이 계좌 대화방에서 반드시 지켜야 할 제약입니다. 사용자 요청이 제약에 위배되면 친절하게 이유를 설명하고 가능한 대안을 제시하세요.')
+  }
+
+  // 타 계좌 크로스 컨텍스트 (acc001/acc008/card001)
+  if (session && guiContext?.accountId) {
+    const crossCtx = getCrossAccountSummary(session, guiContext.accountId)
+    if (crossCtx) lines.push(crossCtx)
+  }
+
+  // accountId 기반 AI 개성 주입
+  const ACCOUNT_PERSONALITIES = {
+    acc001: '당신은 주계좌(입출금) 전담 AI입니다. 실용적이고 직설적으로 소통하세요.',
+    acc008: '당신은 급여계좌 전담 AI입니다. 이 고객의 급여 입금과 지출 패턴을 격려하며 소통하세요.',
+    card001: '당신은 체크카드 전담 AI입니다. 지출 절약과 스마트 소비를 중심으로 소통하세요.',
+  }
+  if (guiContext?.accountId && ACCOUNT_PERSONALITIES[guiContext.accountId]) {
+    lines.push('')
+    lines.push('[ACCOUNT_PERSONALITY]')
+    lines.push(ACCOUNT_PERSONALITIES[guiContext.accountId])
+    lines.push('[/ACCOUNT_PERSONALITY]')
   }
 
   return SYSTEM_PROMPT + lines.join('\n')
@@ -614,7 +664,7 @@ app.post('/api/chat', async (req, res) => {
       const stream = anthropic.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
-        system: buildSystemPrompt(guiContext),
+        system: buildSystemPrompt(guiContext, session),
         tools: toolDefinitions,
         tool_choice: toolChoice,
         messages: session.messages.map(({ _guiScope, ...m }) => m),
@@ -785,10 +835,15 @@ app.post('/api/confirm-transfer', async (req, res) => {
   const session = getSession(sessionId)
 
   if (!session.pendingTransfer) {
+    // #7 멱등성: 이미 처리된 이체에 재시도가 온 경우
+    if (confirmed && session.lastConfirmedTransferId) {
+      return res.status(409).json({ error: '이미 처리된 이체입니다.', idempotent: true })
+    }
     return res.status(400).json({ error: '대기 중인 이체가 없습니다.' })
   }
 
   const pending = session.pendingTransfer
+  const transferId = pending.toolUseId || ('tr_' + Date.now())
   session.pendingTransfer = null
 
   if (!confirmed) {
@@ -810,6 +865,7 @@ app.post('/api/confirm-transfer', async (req, res) => {
   }, ctx)
 
   if (result.success) {
+    session.lastConfirmedTransferId = transferId  // #7 멱등성 마킹
     sendWsEvent(sessionId, {
       type: 'TRANSFER_COMPLETE',
       data: result,
@@ -1219,6 +1275,14 @@ app.post('/api/room-greeting', async (req, res) => {
       }
     }
 
+    // accountId 기반 프롬프트 오버라이드 (acc001/acc008/card001 개성)
+    const ID_PROMPTS = {
+      acc001: '주계좌(입출금) 전담 AI로서, 실용적이고 직설적으로 오늘의 입출금 현황과 잔액을 1-2문장으로 말을 걸어라. 이모지 금지. 격식체(~입니다, ~까?).',
+      acc008: '급여계좌 전담 AI로서, 이번달 급여 입금 현황과 지출 패턴을 격려하며 1-2문장으로 말을 걸어라. 이모지 금지. 격식체.',
+      card001: '체크카드 전담 AI로서, 이번달 카드 지출 패턴에서 절약 가능한 포인트를 1-2문장으로 짚어주며 말을 걸어라. 이모지 금지. 격식체.',
+    }
+    if (ID_PROMPTS[acc.id]) prompt = ID_PROMPTS[acc.id]
+
     // 입출금 계좌 월간 리포트 (기존 그대로)
     if (acc.type === 'checking') {
       const dayOfMonth = new Date().getDate()
@@ -1351,6 +1415,42 @@ app.post('/api/quick-transfer', (req, res) => {
       balance: checkingAcc.balance,
     },
   })
+})
+
+// ──────────────────────────────────────────────
+// POST /api/demo-start — 임원 데모 시퀀스 트리거 (하드코딩된 이벤트, Claude 호출 없음)
+// ──────────────────────────────────────────────
+const DEMO_SEQUENCE = [
+  { delay: 500,  type: 'TRANSACTION_ALERT',         accountId: 'acc001', payload: { accountId: 'acc001', alertId: 'demo_001', counterpart: '(주)ABC테크', amount: 3000000, amountFormatted: '+3,000,000원', category: '급여', memo: '3월 급여', isIncome: true } },
+  { delay: 1200, type: 'TYPING_START',               accountId: 'acc001' },
+  { delay: 3200, type: 'TYPING_END',                 accountId: 'acc001' },
+  { delay: 3300, type: 'TRANSACTION_ALERT_COMMENT',  accountId: 'acc001', payload: { alertId: 'demo_001', comment: '3월 급여 3,000,000원이 입금되었습니다. 이번 달 지출 계획을 세워보시겠습니까?' } },
+  { delay: 5500, type: 'TYPING_START',               accountId: 'card001' },
+  { delay: 6500, type: 'TRANSACTION_ALERT',          accountId: 'card001', payload: { accountId: 'card001', alertId: 'demo_002', counterpart: '스타벅스 강남점', amount: -8500, amountFormatted: '-8,500원', category: '카페', memo: '', isIncome: false, source: 'card' } },
+  { delay: 8000, type: 'TYPING_END',                 accountId: 'card001' },
+  { delay: 8100, type: 'TRANSACTION_ALERT_COMMENT',  accountId: 'card001', payload: { alertId: 'demo_002', comment: '이번 달 카페 지출이 누적되고 있습니다. 절약 팁이 필요하시면 말씀해 주세요.' } },
+]
+
+app.post('/api/demo-start', (req, res) => {
+  const { sessionId } = req.body
+  const now = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+  res.json({ ok: true })
+
+  for (const step of DEMO_SEQUENCE) {
+    setTimeout(() => {
+      let event
+      if (step.type === 'TYPING_START' || step.type === 'TYPING_END') {
+        event = { type: step.type, data: { accountId: step.accountId } }
+      } else {
+        event = { type: step.type, data: { ...step.payload, timestamp: now } }
+      }
+      if (sessionId) {
+        sendWsEvent(sessionId, event)
+      } else {
+        broadcastWsEvent(event)
+      }
+    }, step.delay)
+  }
 })
 
 // ──────────────────────────────────────────────
