@@ -69,7 +69,26 @@ setInterval(async () => {
     isIncome: tx.amount > 0,
     timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
   }
-  // 1. 먼저 코멘트 없이 알림 전송
+  // 1. 모든 세션의 transactions에 추가 + 계좌 잔액 업데이트
+  const today = new Date().toISOString().split('T')[0]
+  for (const session of sessions.values()) {
+    const acc = session.accounts.find((a) => a.id === tx.accountId)
+    if (acc) {
+      acc.balance += tx.amount
+      session.transactions.unshift({
+        id: 'bg_' + alertId,
+        date: today,
+        amount: tx.amount,
+        category: tx.category,
+        counterpart: tx.counterpart,
+        accountId: tx.accountId,
+        source: tx.source || 'account',
+        memo: tx.memo || '',
+      })
+    }
+  }
+
+  // 2. 먼저 코멘트 없이 알림 전송
   broadcastWsEvent({ type: 'TRANSACTION_ALERT', data: alertData })
 
   // 2. TYPING_START — AI 코멘트 생성 시작 알림
