@@ -45,20 +45,21 @@ function broadcastWsEvent(event) {
 
 // ── 백그라운드 입출금 시뮬레이터 ──
 const BG_TRANSACTIONS = [
-  { accountId: 'acc001', counterpart: '국민건강보험공단', amount: -139230, category: '자동이체', memo: '건강보험료 자동이체' },
-  { accountId: 'acc001', counterpart: '한국전력', amount: -52400, category: '자동이체', memo: '전기요금' },
-  { accountId: 'acc001', counterpart: '(주)카카오뱅크', amount: 3000000, category: '이체', memo: '전세자금 입금' },
-  { accountId: 'acc001', counterpart: '쿠팡', amount: -87900, category: '이체', memo: '쿠팡 결제' },
-  { accountId: 'acc001', counterpart: '박재원', amount: 150000, category: '송금', memo: '' },
-  { accountId: 'acc001', counterpart: 'LG유플러스', amount: -55000, category: '자동이체', memo: '통신요금' },
+  { accountId: 'acc001', counterpart: '국민건강보험공단', amount: -139230, category: '자동이체', memo: '건강보험료 자동이체', counterpartBank: '국민건강보험공단' },
+  { accountId: 'acc001', counterpart: '한국전력', amount: -52400, category: '자동이체', memo: '전기요금', counterpartBank: '한국전력' },
+  { accountId: 'acc001', counterpart: '(주)카카오뱅크', amount: 3000000, category: '이체', memo: '전세자금 입금', counterpartBank: '카카오뱅크' },
+  { accountId: 'acc001', counterpart: '쿠팡', amount: -87900, category: '이체', memo: '쿠팡 결제', counterpartBank: '국민은행' },
+  { accountId: 'acc001', counterpart: '박재원', amount: 150000, category: '송금', memo: '', counterpartBank: '신한은행' },
+  { accountId: 'acc001', counterpart: 'LG유플러스', amount: -55000, category: '자동이체', memo: '통신요금', counterpartBank: 'LG유플러스' },
   { accountId: 'acc006', counterpart: '스타벅스', amount: -6500, category: '카페', memo: '아메리카노', source: 'card' },
   { accountId: 'acc006', counterpart: 'GS25', amount: -4200, category: '편의점', memo: '', source: 'card' },
   { accountId: 'acc006', counterpart: '올리브영', amount: -35800, category: '쇼핑', memo: '', source: 'card' },
 ]
 
 let bgTxIndex = 0
+let bgPaused = false
 setInterval(async () => {
-  if (wsClients.size === 0) return
+  if (wsClients.size === 0 || bgPaused) return
   const tx = BG_TRANSACTIONS[bgTxIndex % BG_TRANSACTIONS.length]
   bgTxIndex++
   const alertId = Date.now().toString()
@@ -280,9 +281,10 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 → 사용자 선택 확인 후 save_alias 저장 → STEP 2로 진행
 
 **status:"no_history"** (거래 이력 없음)
-→ "아직 \${닉네임} 계좌가 등록되어 있지 않습니다. 이름 또는 계좌번호를 알려주시면 등록해 드리겠습니다." 안내
-→ 사용자가 이름을 제공하면 → resolve_contact(이름)으로 재조회 후 "이 분이 \${닉네임}이 맞습니까?" 확인
-→ 확인 완료 후 save_alias 저장 → STEP 2로 진행
+→ UI에 직접 입력 카드가 자동 표시됩니다. 별도 안내 불필요.
+→ 사용자가 UI 카드에서 이름·은행·계좌번호를 입력해 제출하면 메시지로 전달됩니다.
+→ save_alias({ nickname, account_no, real_name, bank }) 호출해 등록 → STEP 2로 진행
+→ 사용자가 직접 텍스트로 이름을 제공한 경우: resolve_contact(이름)으로 재조회 후 확인 → save_alias 저장 → STEP 2로 진행
 
 ### STEP 2. 금액 확인
 - 금액이 명시된 경우 → STEP 3으로 바로 진행
@@ -301,11 +303,21 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 - 조회 요청에 닉네임이 포함되면 resolve_contact 로 실명을 먼저 확인하세요.
 - 어투는 반드시 '~입니다', '~까?', '~드리겠습니다' 형식의 정중한 격식체를 사용하세요. '~요', '~해요', '~할게요' 같은 구어체는 절대 사용하지 마세요.
 - 이모지는 사용하지 마세요.
+- 도구를 호출하기 전에 도구명이나 파라미터를 텍스트로 출력하지 마세요. 도구는 즉시 호출하고, 텍스트 응답에는 사용자에게 보여주는 자연어 문장만 작성하세요.
 
 ## 데이터 출처 안내
 - 은행 계좌 거래내역(get_transactions): 급여·이체·자동이체·송금·이자 등 직접 거래
 - 카드 거래내역(get_card_transactions): 가맹점명만 기록, 품목 상세 불명. 마이데이터 연동 포함.
 - 지출 분석 시 카드 데이터 기반이면 "추정 카테고리 기반 집계로 실제와 다를 수 있습니다"를 반드시 안내하세요.
+
+## 거래 조회 시 필터 사용 원칙 (중요)
+
+채팅 텍스트 응답과 거래내역 카드가 항상 동일한 데이터를 기반으로 해야 합니다. 아래 원칙을 반드시 지키세요:
+
+1. **은행명 필터**: "신한은행으로 보낸", "카카오뱅크에서 받은" 등 → counterpart_bank 파라미터 사용. 절대로 카드 없이 텍스트에서만 은행으로 필터링하지 마세요.
+2. **방향 필터**: "입금", "받은" → direction: income / "출금", "보낸", "송금" → direction: expense
+3. **단일 호출 원칙**: 하나의 질문에 대해 get_transactions를 한 번 호출하고, 그 결과로 카드도 표시하고 텍스트 답변도 작성하세요. 카드용/계산용으로 두 번 호출하면 불일치가 발생합니다.
+4. **합산 계산**: 카드에 표시된 거래 목록의 합산액이 텍스트 답변과 반드시 일치해야 합니다. get_transactions 결과의 transactions 배열 기준으로만 합산하세요.
 
 ## 상품 안내 처리 절차
 
@@ -386,7 +398,52 @@ const ACCOUNT_TYPE_CONTEXTS = {
 // GUI 상태를 System Prompt에 주입해 AI가 "지금 화면이 어딘지" 항상 인식하게 함
 // ──────────────────────────────────────────────
 function buildSystemPrompt(guiContext, session) {
-  if (!guiContext) return SYSTEM_PROMPT
+  const now = new Date()
+  const dayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일']
+  const toStr = (d) => d.toISOString().slice(0, 10)
+  const daysAgo = (n) => toStr(new Date(now.getTime() - n * 86400000))
+
+  // 최근 14일 요일별 날짜 맵 (오늘 포함)
+  const recentDays = {}
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(now.getTime() - i * 86400000)
+    const name = dayNames[d.getDay()]
+    if (!recentDays[name]) recentDays[name] = toStr(d) // 가장 최근 날짜만 저장
+  }
+
+  // 이번 주 월요일, 지난 주 월~일
+  const todayDow = now.getDay() // 0=일 1=월 ... 6=토
+  const daysFromMon = (todayDow === 0 ? 6 : todayDow - 1)
+  const thisMonday = daysAgo(daysFromMon)
+  const lastMonday = daysAgo(daysFromMon + 7)
+  const lastSunday = daysAgo(daysFromMon + 1)
+
+  // 이번 달 / 지난 달
+  const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const lastMonthStart = toStr(lastMonth)
+  const lastMonthEnd = toStr(new Date(now.getFullYear(), now.getMonth(), 0))
+
+  const dayLines = Object.entries(recentDays)
+    .map(([name, date]) => `${name}: ${date}`)
+    .join('\n')
+
+  const dateHeader = `\n[TODAY]\ntoday: ${toStr(now)} (${dayNames[now.getDay()]})\nyesterday: ${daysAgo(1)}\nthis_week_monday: ${thisMonday}\nlast_week: ${lastMonday} ~ ${lastSunday}\nthis_month_start: ${thisMonthStart}\nlast_month: ${lastMonthStart} ~ ${lastMonthEnd}\n최근 14일 요일별 날짜:\n${dayLines}\n[/TODAY]\n"오늘", "어제", "지난 월요일", "이번 주", "지난 주", "이번 달" 등 상대 날짜는 위 날짜를 그대로 사용하세요. 직접 계산하지 마세요.`
+  if (!guiContext) return SYSTEM_PROMPT + dateHeader
+
+  // 서비스 뷰 분기 — 계좌 관련 컨텍스트 주입 없음
+  if (guiContext?.view === 'service') {
+    const serviceLines = [
+      '', '[CURRENT_VIEW]',
+      'view: service',
+      guiContext.serviceId ? `serviceId: ${guiContext.serviceId}` : null,
+      guiContext.serviceName ? `serviceName: ${guiContext.serviceName}` : null,
+      '[/CURRENT_VIEW]',
+      `현재 화면은 "${guiContext.serviceName || '서비스'}" 서비스입니다. 계좌 잔액 조회(get_balance), 이체(transfer) 등 계좌 전용 툴은 사용하지 마세요. 사용자가 계좌 관련 질문을 하면 "계좌 탭에서 확인하시면 됩니다"라고 안내하세요.`,
+    ].filter(Boolean)
+    return SYSTEM_PROMPT + dateHeader + serviceLines.join('\n')
+  }
+
   const lines = ['', '[CURRENT_VIEW]']
   const {
     view, accountId, accountName, accountType, balance, totalBalance,
@@ -451,7 +508,7 @@ function buildSystemPrompt(guiContext, session) {
     lines.push('[/ACCOUNT_PERSONALITY]')
   }
 
-  return SYSTEM_PROMPT + lines.join('\n')
+  return SYSTEM_PROMPT + dateHeader + lines.join('\n')
 }
 
 // ──────────────────────────────────────────────
@@ -674,8 +731,12 @@ app.post('/api/chat', async (req, res) => {
     let archiveAssistantText = ''
     const archiveToolCalls = []
 
+    // 툴 호출 XML 누출 제거 헬퍼 — 완성된 <tool_name>...</tool_name> 패턴만 제거
+    const stripToolXml = (s) => s.replace(/<[a-z_]+>[^]*?<\/[a-z_]+>/g, '')
+
     while (continueLoop) {
       let fullText = ''
+      let sentCleanLen = 0   // 클라이언트에 이미 전송한 clean text 길이
       let toolUses = []
       let currentToolUse = null
 
@@ -707,7 +768,13 @@ app.post('/api/chat', async (req, res) => {
         } else if (event.type === 'content_block_delta') {
           if (event.delta.type === 'text_delta') {
             fullText += event.delta.text
-            sendSSE({ type: 'text', delta: event.delta.text })
+            // 툴 XML 누출 필터링: 완성된 패턴 제거 후 미전송 부분만 전송
+            const clean = stripToolXml(fullText).trimStart()
+            const delta = clean.slice(sentCleanLen)
+            if (delta) {
+              sendSSE({ type: 'text', delta })
+              sentCleanLen = clean.length
+            }
           } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
             currentToolUse.inputJson += event.delta.partial_json
           }
@@ -748,11 +815,11 @@ app.post('/api/chat', async (req, res) => {
 
           const ctx = getSessionCtx(session)
 
-          // ── resolve_contact candidates → 선택 카드 ──
+          // ── resolve_contact: candidates / no_history → 선택·직접입력 카드 ──
           if (tu.name === 'resolve_contact') {
             const result = handleToolCall('resolve_contact', tu.input, ctx)
             toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) })
-            if (result.status === 'candidates') {
+            if (result.status === 'candidates' || result.status === 'no_history') {
               sendSSE({ type: 'ui_card', cardType: 'resolve_contact_candidates', data: result })
             }
             continue
@@ -1340,9 +1407,22 @@ app.post('/api/room-greeting', async (req, res) => {
   res.setHeader('Connection', 'keep-alive')
 
   try {
+    const systemPrompt = buildSystemPrompt(
+      {
+        view: 'account_detail',
+        accountId: acc.id,
+        accountType: acc.type,
+        accountName: acc.name,
+        balance: acc.balance,
+        ...(acc.interestRate && { interestRate: acc.interestRate }),
+        ...(acc.maturityDate && { maturityDate: acc.maturityDate }),
+      },
+      session
+    )
     const stream = anthropic.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 250,
+      system: systemPrompt,
       messages: [{ role: 'user', content: `${context}\n\n${prompt}` }],
     })
 
@@ -1403,6 +1483,9 @@ app.post('/api/quick-transfer', (req, res) => {
   }
 
   const safeAmount = Number(amount) || 0
+  if (!safeAmount || safeAmount <= 0) {
+    return res.status(400).json({ error: 'amount가 필요합니다.' })
+  }
 
   const pendingData = {
     toolUseId: 'quick_' + Date.now(),
@@ -1449,19 +1532,27 @@ app.post('/api/quick-transfer', (req, res) => {
 // POST /api/demo-start — 임원 데모 시퀀스 트리거 (하드코딩된 이벤트, Claude 호출 없음)
 // ──────────────────────────────────────────────
 const DEMO_SEQUENCE = [
-  { delay: 500,  type: 'TRANSACTION_ALERT',         accountId: 'acc001', payload: { accountId: 'acc001', alertId: 'demo_001', counterpart: '(주)ABC테크', amount: 3000000, amountFormatted: '+3,000,000원', category: '급여', memo: '3월 급여', isIncome: true } },
-  { delay: 1200, type: 'TYPING_START',               accountId: 'acc001' },
-  { delay: 3200, type: 'TYPING_END',                 accountId: 'acc001' },
-  { delay: 3300, type: 'TRANSACTION_ALERT_COMMENT',  accountId: 'acc001', payload: { alertId: 'demo_001', comment: '3월 급여 3,000,000원이 입금되었습니다. 이번 달 지출 계획을 세워보시겠습니까?' } },
-  { delay: 5500, type: 'TYPING_START',               accountId: 'card001' },
-  { delay: 6500, type: 'TRANSACTION_ALERT',          accountId: 'card001', payload: { accountId: 'card001', alertId: 'demo_002', counterpart: '스타벅스 강남점', amount: -8500, amountFormatted: '-8,500원', category: '카페', memo: '', isIncome: false, source: 'card' } },
-  { delay: 8000, type: 'TYPING_END',                 accountId: 'card001' },
-  { delay: 8100, type: 'TRANSACTION_ALERT_COMMENT',  accountId: 'card001', payload: { alertId: 'demo_002', comment: '이번 달 카페 지출이 누적되고 있습니다. 절약 팁이 필요하시면 말씀해 주세요.' } },
+  // Step 1: acc008 급여 입금
+  { delay: 500,   type: 'TRANSACTION_ALERT',        accountId: 'acc008', payload: { accountId: 'acc008', alertId: 'demo_001', counterpart: '(주)ABC테크', amount: 3250000, amountFormatted: '+3,250,000원', category: '급여', memo: '4월 급여', isIncome: true } },
+  { delay: 1200,  type: 'TYPING_START',             accountId: 'acc008' },
+  { delay: 3200,  type: 'TYPING_END',               accountId: 'acc008' },
+  { delay: 3300,  type: 'TRANSACTION_ALERT_COMMENT', accountId: 'acc008', payload: { alertId: 'demo_001', comment: '이번 달 급여가 들어왔어요. 지난달보다 147,000원 적네요. 세전 공제 항목이 바뀐 것 같아요. 체크카드 이번 달 이미 62% 사용했어요.' } },
+  // Step 2: card001 스타벅스 (5초 후)
+  { delay: 5500,  type: 'TRANSACTION_ALERT',        accountId: 'card001', payload: { accountId: 'card001', alertId: 'demo_002', counterpart: '스타벅스 강남점', amount: -5500, amountFormatted: '-5,500원', category: '카페', memo: '', isIncome: false, source: 'card' } },
+  { delay: 6200,  type: 'TYPING_START',             accountId: 'card001' },
+  { delay: 8200,  type: 'TYPING_END',               accountId: 'card001' },
+  { delay: 8300,  type: 'TRANSACTION_ALERT_COMMENT', accountId: 'card001', payload: { alertId: 'demo_002', comment: '이번 달 스타벅스 5번째예요. 지난달 전체(4번)보다 많아요.' } },
+  // Step 3: acc001 카드값 자동납부 (10초 후)
+  { delay: 11000, type: 'TRANSACTION_ALERT',        accountId: 'acc001', payload: { accountId: 'acc001', alertId: 'demo_003', counterpart: '신한카드 자동납부', amount: -324000, amountFormatted: '-324,000원', category: '카드대금', memo: '', isIncome: false } },
+  { delay: 11700, type: 'TYPING_START',             accountId: 'acc001' },
+  { delay: 13700, type: 'TYPING_END',               accountId: 'acc001' },
+  { delay: 13800, type: 'TRANSACTION_ALERT_COMMENT', accountId: 'acc001', payload: { alertId: 'demo_003', comment: '체크카드 이번달 결제 대금 324,000원이 자동납부 됐어요.' } },
 ]
 
 app.post('/api/demo-start', (req, res) => {
   const { sessionId } = req.body
   const now = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+  bgPaused = true
   res.json({ ok: true })
 
   for (const step of DEMO_SEQUENCE) {
@@ -1479,12 +1570,15 @@ app.post('/api/demo-start', (req, res) => {
       }
     }, step.delay)
   }
+
+  const lastDelay = Math.max(...DEMO_SEQUENCE.map((s) => s.delay))
+  setTimeout(() => { bgPaused = false }, lastDelay + 3000)
 })
 
 // ──────────────────────────────────────────────
 // 서버 시작
 // ──────────────────────────────────────────────
-export { app }
+export { app, getCrossAccountSummary, buildSystemPrompt }
 
 if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 3001
