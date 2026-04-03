@@ -53,6 +53,15 @@ export const toolDefinitions = [
           type: 'string',
           description: '거래 상대방 실명 (부분 일치). 예: 김영희, 스타벅스',
         },
+        counterpart_bank: {
+          type: 'string',
+          description: '거래 상대방 은행명 (부분 일치). 예: 신한은행, 카카오뱅크. "신한은행으로 입금/출금" 등 은행명으로 필터링 시 사용.',
+        },
+        direction: {
+          type: 'string',
+          enum: ['income', 'expense'],
+          description: '입출금 방향 필터. income=입금(양수), expense=출금(음수). 생략하면 전체.',
+        },
         limit:   { type: 'number',  description: '반환할 최대 건수. 기본값 20.' },
         sort_by: {
           type: 'string',
@@ -82,17 +91,25 @@ export const toolDefinitions = [
   },
   {
     name: 'save_alias',
-    description: '사용자가 확인한 닉네임 → 계좌 매핑을 저장합니다. resolve_contact가 candidates를 반환하고 사용자가 특정 계좌를 선택했을 때 호출하세요.',
+    description: '사용자가 확인한 닉네임 → 계좌 매핑을 저장합니다.\n- 기존 거래 내역의 계좌 선택 시: nickname + account_no 만 전달\n- 신규 계좌 직접 입력 시: nickname + account_no + real_name + bank 모두 전달\nresolve_contact 결과(candidates 또는 no_history)에서 사용자가 계좌를 확정했을 때 반드시 호출하세요.',
     input_schema: {
       type: 'object',
       properties: {
         nickname: {
           type: 'string',
-          description: '저장할 닉네임. 예: 엄마, 절친',
+          description: '저장할 닉네임. 예: 엄마, 절친, 아버지',
         },
         account_no: {
           type: 'string',
-          description: '연결할 계좌번호. contacts 목록의 accountNo와 일치해야 합니다.',
+          description: '연결할 계좌번호. 예: 110-1234-567890',
+        },
+        real_name: {
+          type: 'string',
+          description: '(신규 계좌 전용) 수취인 실명. 예: 김철수',
+        },
+        bank: {
+          type: 'string',
+          description: '(신규 계좌 전용) 은행명. 예: 신한은행, 카카오뱅크',
         },
       },
       required: ['nickname', 'account_no'],
@@ -336,25 +353,29 @@ function handleGetBalance({ account_id }, ctx) {
     if (!acc) return { error: `계좌 ${account_id}를 찾을 수 없습니다.` }
     return { accounts: [serializeAccount(acc)] }
   }
+  const realAccounts = accounts.filter((a) => !a.isPromo)
   return {
-    accounts: accounts.map(serializeAccount),
-    totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
-    totalBalanceFormatted: accounts.reduce((s, a) => s + a.balance, 0).toLocaleString('ko-KR') + '원',
+    accounts: realAccounts.map(serializeAccount),
+    totalBalance: realAccounts.reduce((s, a) => s + a.balance, 0),
+    totalBalanceFormatted: realAccounts.reduce((s, a) => s + a.balance, 0).toLocaleString('ko-KR') + '원',
   }
 }
 
 function handleGetTransactions({
   account_id = 'acc001', start_date, end_date,
-  category, counterpart, limit = 20, sort_by = 'date_desc',
+  category, counterpart, counterpart_bank, direction, limit = 20, sort_by = 'date_desc',
 }, ctx) {
   const { accounts, transactions } = ctx
   const account = accounts.find((a) => a.id === account_id)
 
   let txs = transactions.filter((t) => t.accountId === account_id)
-  if (start_date)  txs = txs.filter((t) => t.date >= start_date)
-  if (end_date)    txs = txs.filter((t) => t.date <= end_date)
-  if (category)    txs = txs.filter((t) => t.category === category)
-  if (counterpart) txs = txs.filter((t) => t.counterpart.includes(counterpart))
+  if (start_date)           txs = txs.filter((t) => t.date >= start_date)
+  if (end_date)             txs = txs.filter((t) => t.date <= end_date)
+  if (category)             txs = txs.filter((t) => t.category === category)
+  if (counterpart)          txs = txs.filter((t) => t.counterpart && t.counterpart.includes(counterpart))
+  if (counterpart_bank)     txs = txs.filter((t) => t.counterpartBank && t.counterpartBank.includes(counterpart_bank))
+  if (direction === 'income')  txs = txs.filter((t) => t.amount > 0)
+  if (direction === 'expense') txs = txs.filter((t) => t.amount < 0)
 
   const sortFns = {
     date_desc:   (a, b) => b.date.localeCompare(a.date),
@@ -462,20 +483,27 @@ function handleResolveContact({ query }, ctx) {
     }
   }
 
-  // 4. 거래 이력도 없음 → 계좌 등록 유도
+  // 4. 거래 이력도 없음 → 직접 입력 UI 카드 표시
   return {
     status: 'no_history',
     query: q,
+    candidates: [],
     message: `'${q}'에 해당하는 계좌가 등록되어 있지 않고, 거래 이력도 없습니다.`,
   }
 }
 
-function handleSaveAlias({ nickname, account_no }, ctx) {
+function handleSaveAlias({ nickname, account_no, real_name, bank }, ctx) {
   const { aliasStore } = ctx
-  const contact = contacts.find((c) => c.accountNo === account_no)
+  let contact = contacts.find((c) => c.accountNo === account_no)
+
+  // 기존 contacts에 없는 신규 계좌 → real_name + bank 로 임시 등록
   if (!contact) {
-    return { success: false, error: `계좌번호 ${account_no}를 찾을 수 없습니다.` }
+    if (!real_name || !bank) {
+      return { success: false, error: `계좌번호 ${account_no}를 찾을 수 없습니다. 실명(real_name)과 은행명(bank)을 함께 전달해 주세요.` }
+    }
+    contact = { realName: real_name, bank, accountNo: account_no }
   }
+
   aliasStore.set(nickname, {
     realName: contact.realName,
     bank: contact.bank,
