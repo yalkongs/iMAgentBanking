@@ -303,7 +303,6 @@ const SYSTEM_PROMPT = `당신은 iM뱅크의 AI 금융 어시스턴트입니다.
 - 조회 요청에 닉네임이 포함되면 resolve_contact 로 실명을 먼저 확인하세요.
 - 어투는 반드시 '~입니다', '~까?', '~드리겠습니다' 형식의 정중한 격식체를 사용하세요. '~요', '~해요', '~할게요' 같은 구어체는 절대 사용하지 마세요.
 - 이모지는 사용하지 마세요.
-- 도구를 호출하기 전에 도구명이나 파라미터를 텍스트로 출력하지 마세요. 도구는 즉시 호출하고, 텍스트 응답에는 사용자에게 보여주는 자연어 문장만 작성하세요.
 
 ## 데이터 출처 안내
 - 은행 계좌 거래내역(get_transactions): 급여·이체·자동이체·송금·이자 등 직접 거래
@@ -430,20 +429,6 @@ function buildSystemPrompt(guiContext, session) {
 
   const dateHeader = `\n[TODAY]\ntoday: ${toStr(now)} (${dayNames[now.getDay()]})\nyesterday: ${daysAgo(1)}\nthis_week_monday: ${thisMonday}\nlast_week: ${lastMonday} ~ ${lastSunday}\nthis_month_start: ${thisMonthStart}\nlast_month: ${lastMonthStart} ~ ${lastMonthEnd}\n최근 14일 요일별 날짜:\n${dayLines}\n[/TODAY]\n"오늘", "어제", "지난 월요일", "이번 주", "지난 주", "이번 달" 등 상대 날짜는 위 날짜를 그대로 사용하세요. 직접 계산하지 마세요.`
   if (!guiContext) return SYSTEM_PROMPT + dateHeader
-
-  // 서비스 뷰 분기 — 계좌 관련 컨텍스트 주입 없음
-  if (guiContext?.view === 'service') {
-    const serviceLines = [
-      '', '[CURRENT_VIEW]',
-      'view: service',
-      guiContext.serviceId ? `serviceId: ${guiContext.serviceId}` : null,
-      guiContext.serviceName ? `serviceName: ${guiContext.serviceName}` : null,
-      '[/CURRENT_VIEW]',
-      `현재 화면은 "${guiContext.serviceName || '서비스'}" 서비스입니다. 계좌 잔액 조회(get_balance), 이체(transfer) 등 계좌 전용 툴은 사용하지 마세요. 사용자가 계좌 관련 질문을 하면 "계좌 탭에서 확인하시면 됩니다"라고 안내하세요.`,
-    ].filter(Boolean)
-    return SYSTEM_PROMPT + dateHeader + serviceLines.join('\n')
-  }
-
   const lines = ['', '[CURRENT_VIEW]']
   const {
     view, accountId, accountName, accountType, balance, totalBalance,
@@ -1533,20 +1518,34 @@ app.post('/api/quick-transfer', (req, res) => {
 // ──────────────────────────────────────────────
 const DEMO_SEQUENCE = [
   // Step 1: acc008 급여 입금
-  { delay: 500,   type: 'TRANSACTION_ALERT',        accountId: 'acc008', payload: { accountId: 'acc008', alertId: 'demo_001', counterpart: '(주)ABC테크', amount: 3250000, amountFormatted: '+3,250,000원', category: '급여', memo: '4월 급여', isIncome: true } },
-  { delay: 1200,  type: 'TYPING_START',             accountId: 'acc008' },
-  { delay: 3200,  type: 'TYPING_END',               accountId: 'acc008' },
-  { delay: 3300,  type: 'TRANSACTION_ALERT_COMMENT', accountId: 'acc008', payload: { alertId: 'demo_001', comment: '이번 달 급여가 들어왔어요. 지난달보다 147,000원 적네요. 세전 공제 항목이 바뀐 것 같아요. 체크카드 이번 달 이미 62% 사용했어요.' } },
+  { delay: 500,  type: 'TRANSACTION_ALERT',
+    accountId: 'acc008',
+    payload: { accountId: 'acc008', alertId: 'demo_001', counterpart: '(주)ABC테크', amount: 3250000, amountFormatted: '+3,250,000원', category: '급여', memo: '4월 급여', isIncome: true } },
+  { delay: 1200, type: 'TYPING_START',              accountId: 'acc008' },
+  { delay: 3200, type: 'TYPING_END',                accountId: 'acc008' },
+  { delay: 3300, type: 'TRANSACTION_ALERT_COMMENT',
+    accountId: 'acc008',
+    payload: { alertId: 'demo_001', comment: '이번 달 급여가 들어왔어요. 지난달보다 147,000원 적네요. 세전 공제 항목이 바뀐 것 같아요. 체크카드 이번 달 이미 62% 사용했어요.' } },
+
   // Step 2: card001 스타벅스 (5초 후)
-  { delay: 5500,  type: 'TRANSACTION_ALERT',        accountId: 'card001', payload: { accountId: 'card001', alertId: 'demo_002', counterpart: '스타벅스 강남점', amount: -5500, amountFormatted: '-5,500원', category: '카페', memo: '', isIncome: false, source: 'card' } },
-  { delay: 6200,  type: 'TYPING_START',             accountId: 'card001' },
-  { delay: 8200,  type: 'TYPING_END',               accountId: 'card001' },
-  { delay: 8300,  type: 'TRANSACTION_ALERT_COMMENT', accountId: 'card001', payload: { alertId: 'demo_002', comment: '이번 달 스타벅스 5번째예요. 지난달 전체(4번)보다 많아요.' } },
+  { delay: 5500, type: 'TRANSACTION_ALERT',
+    accountId: 'card001',
+    payload: { accountId: 'card001', alertId: 'demo_002', counterpart: '스타벅스 강남점', amount: -5500, amountFormatted: '-5,500원', category: '카페', memo: '', isIncome: false, source: 'card' } },
+  { delay: 6200, type: 'TYPING_START',              accountId: 'card001' },
+  { delay: 8200, type: 'TYPING_END',                accountId: 'card001' },
+  { delay: 8300, type: 'TRANSACTION_ALERT_COMMENT',
+    accountId: 'card001',
+    payload: { alertId: 'demo_002', comment: '이번 달 스타벅스 5번째예요. 지난달 전체(4번)보다 많아요.' } },
+
   // Step 3: acc001 카드값 자동납부 (10초 후)
-  { delay: 11000, type: 'TRANSACTION_ALERT',        accountId: 'acc001', payload: { accountId: 'acc001', alertId: 'demo_003', counterpart: '신한카드 자동납부', amount: -324000, amountFormatted: '-324,000원', category: '카드대금', memo: '', isIncome: false } },
-  { delay: 11700, type: 'TYPING_START',             accountId: 'acc001' },
-  { delay: 13700, type: 'TYPING_END',               accountId: 'acc001' },
-  { delay: 13800, type: 'TRANSACTION_ALERT_COMMENT', accountId: 'acc001', payload: { alertId: 'demo_003', comment: '체크카드 이번달 결제 대금 324,000원이 자동납부 됐어요.' } },
+  { delay: 11000, type: 'TRANSACTION_ALERT',
+    accountId: 'acc001',
+    payload: { accountId: 'acc001', alertId: 'demo_003', counterpart: '신한카드 자동납부', amount: -324000, amountFormatted: '-324,000원', category: '카드대금', memo: '', isIncome: false } },
+  { delay: 11700, type: 'TYPING_START',              accountId: 'acc001' },
+  { delay: 13700, type: 'TYPING_END',                accountId: 'acc001' },
+  { delay: 13800, type: 'TRANSACTION_ALERT_COMMENT',
+    accountId: 'acc001',
+    payload: { alertId: 'demo_003', comment: '체크카드 이번달 결제 대금 324,000원이 자동납부 됐어요.' } },
 ]
 
 app.post('/api/demo-start', (req, res) => {
@@ -1578,7 +1577,7 @@ app.post('/api/demo-start', (req, res) => {
 // ──────────────────────────────────────────────
 // 서버 시작
 // ──────────────────────────────────────────────
-export { app, getCrossAccountSummary, buildSystemPrompt }
+export { app, getCrossAccountSummary }
 
 if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 3001
